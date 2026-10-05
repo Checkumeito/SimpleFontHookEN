@@ -1,97 +1,114 @@
-# Majiro 适配器
+# Majiro Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 Majiro 的磁盘字形缓存与运行时字形缓存。适配器让 `savedata/fc_*.fcd` 和
-`savedata/fca_*.fcd` 对当前字体版本保持一致，并为 Majiro 的 ANSI 文本与字符集分支
-提供定向兼容。
+This directory handles Majiro's disk glyph cache and runtime glyph cache. The adapter keeps
+`savedata/fc_*.fcd` and `savedata/fca_*.fcd` consistent with the current font version and provides
+targeted compatibility for Majiro's ANSI text and character-set branches.
 
-## 通用路径覆盖范围
+## Coverage of the Generic Path
 
-Majiro 同时保留磁盘 FCD 与进程内字形表。磁盘缓存命中时可以绕过当前字体生成路径；
-运行时表则会在字体切换后继续引用旧宽度、偏移和位图数据。两级缓存只处理其中一级，
-都会形成字体对象与画面字形不一致的状态。
+Majiro maintains both on-disk FCD files and in-process glyph tables. A disk-cache hit can bypass
+the current font-generation path; the runtime tables can continue referencing old widths,
+offsets, and bitmap data after a font switch. Handling only one of the two cache levels leaves
+font objects inconsistent with the glyphs on screen.
 
-适配器让只读 FCD 请求形成缓存缺失，由引擎按原格式写回；对进程内缓存则先识别完整布局，
-再按配置版本清理计数与 dirty 状态。ANSI 兼容判断是独立的引擎定向入口，不由替换字体
-反推代码页。
+The adapter makes read-only FCD requests appear as cache misses, allowing the engine to write
+them back in its original format. For the in-process cache, it first identifies the complete
+layout, then clears counts and dirty state according to the configuration version. ANSI
+compatibility decisions have an independent engine-specific entry point; the code page is not
+inferred from the replacement font.
 
-## 身份与资源
+## Identity and Resources
 
-Majiro 身份由主模块中的 `MajiroObj`、`MajiroArcV` 或 `MajiroSavV` 格式标记确认。
-标记直接从已映射模块的可读内存查询，结果在进程内缓存。
+Majiro identity is confirmed by the `MajiroObj`, `MajiroArcV`, or `MajiroSavV` format markers in
+the main module. The markers are queried directly from the readable memory of the mapped
+module, and the result is cached in the process.
 
-`.arc` 与 `.fcd` 后缀只用于候选文件路由。身份成立后，适配器再验证 `savedata` 层级、
-`fc_`/`fca_` 命名和三位宽高字段。
+The `.arc` and `.fcd` extensions are used only for candidate-file routing. After identity is
+established, the adapter verifies the `savedata` directory level, `fc_`/`fca_` naming, and
+three-digit width and height fields.
 
-## 文件入口
+## File Entry Points
 
-- `majiro_font_cache.cppinc`：引擎检测、FCD 路径分类、运行时布局扫描和配置通知。
-- `engine_file_dispatch.cppinc`：调用磁盘缓存的打开、属性和搜索处理函数。
-- 通用字体数据与文字转换钩子：查询 Majiro 的定向兼容决策。
+- `majiro_font_cache.cppinc`: Engine detection, FCD path classification, runtime-layout scanning, and configuration notifications.
+- `engine_file_dispatch.cppinc`: Calls the disk cache's open, attribute, and search handlers.
+- Generic font-data and text-conversion hooks: Query Majiro's targeted compatibility decisions.
 
-## 实现原理
+## Implementation
 
-1. 主模块格式标记确认 Majiro 身份并缓存结果。
-2. 路径分类验证 `savedata` 层级、`fc_`/`fca_` 前缀、三位宽高字段和 `.fcd` 后缀。
-3. 匹配的只读打开、属性和通配搜索返回缺失语义，写入请求由真实 API 完成。
-4. 有界代码与内存扫描定位宽度表、偏移表、数据计数和 dirty 标记，并保存布局描述。
-5. 配置通知按 `ConfigVersion` 去重，只清理地址范围、可写保护和字段关系均成立的布局。
-6. 通用文字与字体查询钩子在身份成立后读取 CP932 解码和 `DEFAULT_CHARSET` 保留策略。
+1. Confirm Majiro identity using the main-module format markers and cache the result.
+2. Path classification validates the `savedata` directory level, `fc_`/`fca_` prefixes,
+   three-digit width and height fields, and `.fcd` extension.
+3. Matching read-only opens, attribute requests, and wildcard searches return missing-file
+   semantics; writes are performed by the real API.
+4. Bounded code and memory scans locate the width table, offset table, data count, and dirty
+   flag, and save a layout description.
+5. Configuration notifications are deduplicated by `ConfigVersion`. Clear only layouts whose
+   address ranges, writable protection, and field relationships all validate.
+6. After identity is established, the generic text and font-query hooks read the CP932 decoding
+   and `DEFAULT_CHARSET` preservation policies.
 
-## 功能
+## Features
 
-- 识别 `savedata` 根目录下符合 Majiro 命名格式的 FCD 字体缓存。
-- 对只读缓存请求提供缺失结果，让引擎通过当前 GDI 字体生成字形数据。
-- 允许引擎按原格式写入新的 FCD 缓存。
-- 扫描并验证运行时字形宽度表、偏移表、数据区计数和 dirty 标记。
-- 配置版本变化时清空已验证的运行时表，并标记缓存内容待生成。
-- 在 Majiro 文本路径使用 CP932 解码规则，并为 `DEFAULT_CHARSET` 字体请求保留源字符集。
+- Identifies FCD font caches under the `savedata` root that follow Majiro's naming format.
+- Returns missing-file results for read-only cache requests so the engine generates glyph data using the current GDI font.
+- Allows the engine to write new FCD caches in the original format.
+- Scans and validates runtime glyph-width tables, offset tables, data-area counts, and dirty flags.
+- Clears validated runtime tables when the configuration version changes, marking cache content for regeneration.
+- Uses CP932 decoding rules on Majiro's text path and preserves the source character set for `DEFAULT_CHARSET` font requests.
 
-## 设计约束依据
+## Rationale for the Design Constraints
 
-- FCD 写入完全交给引擎，避免依赖未公开的缓存序列化细节。
-- 文件名结构参与资源路由但不参与身份确认，降低共享 `.arc`、`.fcd` 后缀的误判风险。
-- 运行时刷新要求完整字段关系和可写范围，局部特征命中不足以产生内存写入。
-- CP932 与字符集策略只在 Majiro 身份下提供给通用编码模块，字体开关本身不改变编码。
-- 磁盘缓存和运行时缓存分别失效，使缺少某一能力的版本仍可使用另一条兼容路径。
+- FCD writes are left entirely to the engine, avoiding dependence on undocumented cache-serialization details.
+- Filename structure participates in resource routing but not identity confirmation, reducing false positives from shared `.arc` and `.fcd` extensions.
+- Runtime refresh requires complete field relationships and writable ranges; a partial signature match is insufficient to write memory.
+- CP932 and character-set policies are provided to the generic encoding module only under confirmed Majiro identity; the font switch itself does not change encoding.
+- Disk and runtime caches are invalidated separately, allowing versions missing one capability to use the other compatibility path.
 
-## 配置
+## Configuration
 
 - `EnableMajiroHook`
 - `MajiroDisableFontCache`
-- 通用字体、字符集、代码页重定向和文字映射配置
+- Generic font, character-set, code-page-redirection, and text-mapping settings
 
-## 运行约束
+## Runtime Constraints
 
-- FCD 文件名、目录层级和三位宽高字段必须完整匹配。
-- 运行时缓存地址必须位于主模块范围且覆盖可写内存。
-- 缓存布局扫描每个进程执行一次，刷新以 `ConfigVersion` 去重。
-- 文件写入由 Majiro 自身完成，文件虚拟化只影响缓存读取与查询。
-- CP932 与字符集兼容只在 Majiro 正向检测成立时启用。
+- FCD filenames, directory levels, and three-digit width and height fields must match completely.
+- Runtime-cache addresses must be within the main module and cover writable memory.
+- Cache-layout scanning runs once per process; refreshes are deduplicated by `ConfigVersion`.
+- Majiro performs its own file writes; file virtualization affects only cache reads and queries.
+- CP932 and character-set compatibility are enabled only after positive Majiro detection.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 固定主模块哈希，记录 `MajiroObj`、`MajiroArcV`、`MajiroSavV` 标记和进程架构。
-2. 收集 `savedata/fc_*.fcd`、`savedata/fca_*.fcd`，分别验证目录层级、前缀、三位宽高字段
-   和扩展名；无效命名作为非目标文件。
-3. 记录读、属性、通配搜索与写入的 API 结果，确认只读缓存返回缺失而写入调用真实 API。
-4. 保存运行时宽度表、偏移表、数据计数、dirty 标记的地址范围、保护属性和字段关系；配置
-   切换时记录被清理的布局与 `ConfigVersion`。
-5. 对 CP932、`DEFAULT_CHARSET` 和文字映射分别保存源字节、解码结果和映射开关。
+1. Fix the main-module hash and record the `MajiroObj`, `MajiroArcV`, and `MajiroSavV` markers and
+   process architecture.
+2. Collect `savedata/fc_*.fcd` and `savedata/fca_*.fcd`. Independently verify directory levels,
+   prefixes, three-digit width and height fields, and extensions; use invalid names as nontarget
+   files.
+3. Record API results for reads, attributes, wildcard searches, and writes. Confirm that
+   read-only cache requests return missing-file results while writes call the real API.
+4. Save address ranges, protection attributes, and field relationships for the runtime width
+   table, offset table, data count, and dirty flag. When switching configuration, record the
+   cleared layouts and `ConfigVersion`.
+5. For CP932, `DEFAULT_CHARSET`, and text mapping, separately save source bytes, decoded results,
+   and the mapping switch state.
 
-| 场景 | 预期结果 |
+| Scenario | Expected Result |
 | --- | --- |
-| Majiro 标记齐全 + 有效 FCD 名称 | 磁盘缓存读请求返回缺失，允许引擎写回 |
-| 共享 `.arc`/`.fcd` 后缀但无标记 | 身份不成立，文件透传 |
-| 运行时布局字段关系不完整 | 不写入内存，保留运行时缓存 |
-| 配置切换 + 完整布局 | 只清理已验证字段，记录版本关联 |
-| `DEFAULT_CHARSET` 或 CP932 分支 | 保留源字符集并按通用编码规则处理 |
+| Complete Majiro markers + a valid FCD name | Disk-cache reads return missing-file results, allowing the engine to write the cache back |
+| Shared `.arc`/`.fcd` extensions without markers | Identity is not established; files pass through |
+| Incomplete field relationships in a runtime layout | No memory writes; preserves the runtime cache |
+| Configuration switch + a complete layout | Clears only validated fields and records the version association |
+| `DEFAULT_CHARSET` or CP932 branch | Preserves the source character set and follows generic encoding rules |
 
-证据材料包含文件名清单、布局摘要、读写结果、`[DEBUG][Majiro]` 日志和非目标样本。
-记录格式见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+Evidence includes filename lists, layout summaries, read/write results, `[DEBUG][Majiro]` logs,
+and nontarget samples. For the record format, see
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-覆盖 `fc_`/`fca_` 缓存、通配搜索、缓存写入、运行时布局命中与缺失、字体切换、
-`DEFAULT_CHARSET` 分支、文字映射、功能开关、共享 ARC 后缀和缺少 Majiro 标记的程序。
+Cover `fc_`/`fca_` caches, wildcard searches, cache writes, runtime-layout matches and misses,
+font switching, the `DEFAULT_CHARSET` branch, text mapping, feature switches, shared ARC
+extensions, and programs without Majiro markers.

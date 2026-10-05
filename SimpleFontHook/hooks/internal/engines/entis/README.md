@@ -1,100 +1,125 @@
-# EntisGLS 适配器
+# EntisGLS Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 EntisGLS 的位图字体注册、`SGLWindowsFont` 字形栅格化和
-`SGLReferenceFont` 字体代理。适配器将引擎内部字体对象连接到通用 HFONT 替换路径，
-并支持配置版本驱动的字体刷新。
+This directory handles EntisGLS bitmap font registration, `SGLWindowsFont` glyph rasterization,
+and `SGLReferenceFont` font proxies. The adapter connects internal engine font objects to the
+general HFONT replacement path and supports font refreshes driven by configuration versions.
 
-## 通用路径覆盖范围
+## Coverage of the General Paths
 
-EntisGLS 可以从 BMF 位图字体创建内部对象，并通过 `SGLWindowsFont` 和
-`SGLReferenceFont` 自己管理 HDC、HFONT、样式与字形栅格。通用字体创建钩子能够影响
-单个 Win32 调用，却无法把位图字体分支、引用对象和内部生命周期组织成一致状态。
+EntisGLS can create internal objects from BMF bitmap fonts and manage HDC, HFONT, styles, and
+glyph rasters itself through `SGLWindowsFont` and `SGLReferenceFont`. General font creation
+hooks can affect individual Win32 calls but cannot organize the bitmap font branch, reference
+objects, and internal lifecycles into consistent state.
 
-适配器把 BMF 注册导向 Windows 字体实现，为引用字体建立代理对象，并把替换 HFONT 的
-选择范围限制在一次引擎栅格调用内。这样既覆盖引擎内部对象，又保持原对象拥有的样式和
-析构时序。
+The adapter routes BMF registration to the Windows font implementation, creates proxy objects
+for reference fonts, and limits replacement HFONT selection to a single engine raster call.
+This covers internal engine objects while preserving the original objects' styles and
+destruction timing.
 
-## 检测条件
+## Detection Conditions
 
-主模块需要同时提供字体库存证据和位图加载器证据：
+The main module must provide both font stock evidence and bitmap loader evidence:
 
-- 导出 `SGLFont::m_pFontStock` 对应符号。
-- 导出 `SGLBitmapFontLoader::m_RuntimeClass`，或映像中存在对应的运行时类名。
+- Export the symbol corresponding to `SGLFont::m_pFontStock`.
+- Export `SGLBitmapFontLoader::m_RuntimeClass`, or contain the corresponding runtime class
+  name in the image.
 
-完整运行时对象适配面向 Win32 MSVC 布局；其他架构保留统一调用入口。
+Complete runtime object adaptation targets the Win32 MSVC layout; other architectures retain
+the unified call entry points.
 
-## 文件结构
+## File Structure
 
-- `entis_font.cppinc`：聚合入口。
-- `entis_state.cppinc`：PE 映像视图、检测、内存范围检查和日志。
-- `entis_bitmap_font.cppinc`：位图字体注册函数定位与入口处理。
-- `entis_runtime.cppinc`：RTTI/vtable 解析、Windows 字体代理、字形栅格钩子和配置通知。
+- `entis_font.cppinc`: aggregation entry point.
+- `entis_state.cppinc`: PE image views, detection, memory range checks, and logging.
+- `entis_bitmap_font.cppinc`: location and entry handling of bitmap font registration functions.
+- `entis_runtime.cppinc`: RTTI/vtable parsing, Windows font proxies, glyph raster hooks, and
+  configuration notifications.
 
-## 实现原理
+## Implementation Principles
 
-1. 检测模块同时验证字体库存符号与位图加载器类证据。
-2. 位图注册模块定位 BMF 注册入口，使匹配请求进入 `SGLWindowsFont` 路径。
-3. RTTI 与 vtable 解析器定位 `SetStyle`、析构和字形栅格方法，并校验所有函数地址。
-4. `SGLReferenceFont` 首次使用时获得对应 Windows 字体代理，代理同步样式并按原对象键控。
-5. 字形栅格入口保存 HDC 状态、选择当前替换 HFONT、调用引擎方法，然后恢复原状态。
-6. 配置通知发布版本，渲染线程在受控入口观察并应用当前字体状态。
+1. Module detection validates both the font stock symbol and bitmap loader class evidence.
+2. The bitmap registration module locates the BMF registration entry point and sends matching
+   requests to the `SGLWindowsFont` path.
+3. RTTI and vtable parsers locate `SetStyle`, destruction, and glyph raster methods and
+   validate all function addresses.
+4. On first use, `SGLReferenceFont` obtains a corresponding Windows font proxy. The proxy
+   synchronizes styles and is keyed by the original object.
+5. The glyph raster entry point saves HDC state, selects the current replacement HFONT,
+   calls the engine method, then restores the original state.
+6. Configuration notifications publish the version; the rendering thread observes and
+   applies the current font state at controlled entry points.
 
-## 功能
+## Features
 
-- 定位位图字体注册入口，使 BMF 请求进入 `SGLWindowsFont` 字体路径。
-- 通过 RTTI 解析 `SGLWindowsFont` 与 `SGLReferenceFont` 的析构、`SetStyle` 和
-  字形栅格方法。
-- 为引用字体对象创建对应 Windows 字体代理，并同步样式和生命周期。
-- 在字形栅格调用范围内选择当前替换 HFONT，调用完成后恢复 HDC 状态。
-- 使用 `ConfigVersion` 记录渲染线程观察到的字体配置。
+- Locate the bitmap font registration entry point and route BMF requests to the
+  `SGLWindowsFont` font path.
+- Resolve destruction, `SetStyle`, and glyph raster methods for `SGLWindowsFont` and
+  `SGLReferenceFont` through RTTI.
+- Create corresponding Windows font proxies for reference font objects and synchronize
+  styles and lifecycles.
+- Select the current replacement HFONT within the scope of a glyph raster call and restore
+  HDC state when the call completes.
+- Use `ConfigVersion` to record the font configuration observed by the rendering thread.
 
-## 设计约束依据
+## Rationale for Design Constraints
 
-- BMF 分支在注册阶段转向 Windows 字体，比解析和重建专有位图格式具有更小的数据面。
-- 代理对象按原引用字体地址管理，使样式同步和析构释放具有明确所有者。
-- HDC 修改只存在于单次栅格调用，防止引擎的其他绘制对象继承临时字体状态。
-- RTTI、vtable 和对象内存逐层校验，能力缺失时保留引擎原生字体路径。
-- 完整对象布局面向 Win32 MSVC ABI，架构判断位于能力阶段而非引擎身份阶段。
+- Routing the BMF branch to Windows fonts during registration has a smaller data surface
+  than parsing and rebuilding a proprietary bitmap format.
+- Proxy objects are managed by the original reference font address, giving style
+  synchronization and destructor cleanup an explicit owner.
+- HDC changes exist only during a single raster call, preventing the engine's other drawing
+  objects from inheriting temporary font state.
+- RTTI, vtables, and object memory are validated layer by layer; missing capabilities preserve
+  the engine's native font path.
+- The complete object layout targets the Win32 MSVC ABI. Architecture checks occur at the
+  capability stage rather than the engine identity stage.
 
-## 配置
+## Configuration
 
 - `EnableEntisHook`
 - `EntisDisableBitmapFonts`
 - `EntisRefreshFontOnSwitch`
-- 通用字体名称、字符集和度量配置
+- General font name, character set, and metrics configuration
 
-## 运行约束
+## Runtime Constraints
 
-- PE 节、RTTI、vtable、函数地址和对象内存都经过范围与保护属性校验。
-- 引用字体代理按原对象地址管理，并在对应析构路径释放。
-- HDC 字体替换限定在单次栅格调用范围内。
-- Detours 挂接使用统一安装事务，运行时准备先于事务提交。
-- 共享代理表由互斥锁保护，持锁范围只覆盖容器访问。
+- PE sections, RTTI, vtables, function addresses, and object memory all undergo range and
+  protection attribute validation.
+- Reference font proxies are managed by the original object address and released on the
+  corresponding destruction path.
+- HDC font replacement is limited to the scope of a single raster call.
+- Detours attachment uses the unified installation transaction; runtime preparation precedes
+  transaction commit.
+- A mutex protects the shared proxy table, and its locked scope only covers container access.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 对主模块执行导出检查，记录 `SGLFont::m_pFontStock` 与
-   `SGLBitmapFontLoader::m_RuntimeClass` 的符号或类名证据。
-2. 逐层保存 RTTI、vtable、`SetStyle`、析构和字形栅格入口的地址范围、节保护属性和签名
-   检查结果；地址只作为该样本的证据，不跨构建复用。
-3. 使用 BMF、Windows 字体、引用字体三类对象观察注册、代理创建、样式同步、栅格调用前后
-   HDC 和析构释放。
-4. 配置切换时记录代理表、对象地址、`ConfigVersion` 和线程；布局检查失败时确认原路径。
+1. Inspect main module exports and record symbol or class-name evidence for
+   `SGLFont::m_pFontStock` and `SGLBitmapFontLoader::m_RuntimeClass`.
+2. Retain address ranges, section protection attributes, and signature check results for RTTI,
+   vtables, `SetStyle`, destruction, and glyph raster entry points layer by layer. Addresses
+   serve only as evidence for that sample and are not reused across builds.
+3. Use BMF, Windows font, and reference font objects to observe registration, proxy creation,
+   style synchronization, HDC before and after raster calls, and destructor cleanup.
+4. When switching configuration, record the proxy table, object addresses, `ConfigVersion`,
+   and threads. Confirm the original path when layout validation fails.
 
-| 场景 | 预期结果 |
+| Scenario | Expected result |
 | --- | --- |
-| 两组导出/类证据通过 | 安装位图注册和运行时对象能力 |
-| 缺少任一证据 | 不解析 vtable，不写入对象内存 |
-| 单次栅格调用 | 临时选择替换 HFONT，返回前恢复 HDC |
-| 引用对象析构 | 代理按原对象地址释放 |
-| 非 Entis 模块 | 通用 GDI 路径，Entis 状态为空 |
+| Both export/class evidence groups pass | Install bitmap registration and runtime object capabilities |
+| Either evidence group is missing | Do not parse vtables or write object memory |
+| Single raster call | Temporarily select the replacement HFONT; restore HDC before returning |
+| Reference object destruction | Release proxy by the original object address |
+| Non-Entis module | General GDI path; Entis state is empty |
 
-证据目录包含 PE 导出、RTTI/vtable 摘要、对象生命周期日志、Win32/x64 结果和非目标样本。
-字段规范见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains PE exports, RTTI/vtable summaries, object lifecycle logs,
+Win32/x64 results, and non-target samples. See
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md) for field standards.
 
-## 验证
+## Verification
 
-覆盖位图字体、Windows 字体、引用字体、RTTI 导出路径、特征扫描路径、功能开关、字体
-热切换、对象析构、Win32 Release 和非 Entis 程序。
+Cover bitmap fonts, Windows fonts, reference fonts, the RTTI export path, the signature scan
+path, feature switches, live font switching, object destruction, Win32 Release, and non-Entis
+programs.

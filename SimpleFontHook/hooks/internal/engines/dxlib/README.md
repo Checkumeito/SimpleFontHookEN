@@ -1,97 +1,122 @@
-# DxLib 适配器
+# DxLib Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 DxLib `_FONTSET.MED` 字形缓存与当前替换字体之间的一致性，并为 DxLib 的
-字体数据查询提供引擎身份判断。缓存模型使用游戏原生的根目录 `_FONTSET.MED` 文件。
+This directory maintains consistency between the DxLib `_FONTSET.MED` glyph cache and the
+current replacement font, and provides engine identity decisions for DxLib font data queries.
+The cache model uses the game's native `_FONTSET.MED` file in the root directory.
 
-## 通用路径覆盖范围
+## Coverage of the General Paths
 
-`_FONTSET.MED` 保存由某个字体生成的字形缓存。缓存存在时，DxLib 可以直接读取字形数据，
-当前进程中的字体创建和 `GetFontData` 路径便没有机会生成对应内容。缓存记录的字体名与
-当前配置不一致时，配置界面和画面可能来自不同字体来源。
+`_FONTSET.MED` stores a glyph cache generated from a particular font. When the cache exists,
+DxLib can read glyph data directly, leaving font creation and `GetFontData` paths in the
+current process no opportunity to generate the corresponding content. If the cached font
+name differs from the current configuration, the configuration interface and display may use
+different font sources.
 
-适配器不解析或改写 MED 内容，而是维护“这个原生缓存对应哪个字体”的一致性状态。
-需要重建时，只让读取和枚举表现为缓存缺失，写入仍由 DxLib 按自己的格式完成。
+The adapter does not parse or rewrite MED content. It maintains consistency state for which
+font the native cache corresponds to. When a rebuild is needed, it only makes reads and
+enumeration appear as though the cache is missing; DxLib still writes its own format.
 
-## 身份与资源
+## Identity and Resources
 
-DxLib 身份要求主模块同时提供 DxLib 库标记和 DxLib 字体契约标记。字体契约覆盖
-`CreateFontToHandle`、`DrawStringToHandle` 与 `_FONTSET` 运行时路径。检测直接查询已映射
-模块内存并缓存结果。
+DxLib identity requires the main module to provide both DxLib library markers and DxLib font
+contract markers. The font contract covers `CreateFontToHandle`, `DrawStringToHandle`, and
+the `_FONTSET` runtime path. Detection directly queries mapped module memory and caches results.
 
-`_FONTSET.MED` 只表示当前请求属于 DxLib 字形缓存功能。MED 后缀、缓存是否已经生成，
-以及同目录的其他 MED 文件均不参与引擎身份判断。
+`_FONTSET.MED` only indicates that the current request belongs to the DxLib glyph cache
+feature. The MED suffix, whether the cache has already been generated, and other MED files
+in the same directory do not determine engine identity.
 
-## 文件入口
+## File Entry Points
 
-- `dxlib_font_cache.cppinc`：路径分类、引擎检测、缓存文件访问和配置通知。
-- `engine_file_dispatch.cppinc`：调用本模块的打开、属性和目录搜索处理函数。
-- 通用 `GetFontData` 钩子：通过 `DxLibShouldReplaceFontDataQueries` 使用 DxLib 身份。
+- `dxlib_font_cache.cppinc`: path classification, engine detection, cache file access, and
+  configuration notifications.
+- `engine_file_dispatch.cppinc`: calls this module's open, attribute, and directory search handlers.
+- General `GetFontData` hook: uses DxLib identity through `DxLibShouldReplaceFontDataQueries`.
 
-## 实现原理
+## Implementation Principles
 
-1. 主模块标记同时确认 DxLib 身份和字体相关运行时契约。
-2. 路径分类只接受游戏根目录的 `_FONTSET.MED` 及其搜索模式。
-3. `DxLibCachedFontNameW` 与当前 `ForcedFontNameW` 相同且配置允许缓存时，读请求进入真实
-   文件 API。
-4. 字体不匹配或明确禁用缓存时，打开、属性和目录搜索返回一致的缺失语义。
-5. DxLib 以写入方式创建缓存时，适配器保留原生句柄，并在成功打开后记录当前字体名。
-6. 字体数据查询按独立配置进入通用 SFNT 替换与字体表处理路径。
+1. Main module markers confirm both DxLib identity and the font-related runtime contract.
+2. Path classification only accepts `_FONTSET.MED` in the game root directory and its search
+   patterns.
+3. Read requests enter the real file APIs when `DxLibCachedFontNameW` matches the current
+   `ForcedFontNameW` and configuration allows caching.
+4. When fonts do not match or caching is explicitly disabled, opens, attributes, and directory
+   searches return consistent missing-file semantics.
+5. When DxLib creates a cache for writing, the adapter preserves the native handle and records
+   the current font name after a successful open.
+6. Font data queries enter the general SFNT replacement and font table processing paths
+   according to independent configuration.
 
-## 功能
+## Features
 
-- 比较 `DxLibCachedFontNameW` 与当前 `ForcedFontNameW`。
-- 字体发生变化且启用缓存更新时，让 `_FONTSET.MED` 的只读查询返回缺失状态。
-- 保持写入请求指向原生 `_FONTSET.MED`，并在成功打开写入句柄后保存缓存字体名。
-- 在字体数据查询阶段提供替换字体的 SFNT 数据和字体表配置。
-- 使用有限采样记录缓存命中、重建请求和配置版本。
+- Compare `DxLibCachedFontNameW` with the current `ForcedFontNameW`.
+- Make read-only queries for `_FONTSET.MED` report a missing file when the font changes and
+  cache updates are enabled.
+- Keep write requests pointed at the native `_FONTSET.MED`, and save the cached font name
+  after successfully opening a write handle.
+- Supply replacement font SFNT data and font table configuration during font data queries.
+- Use bounded sampling to record cache hits, rebuild requests, and configuration versions.
 
-## 设计约束依据
+## Rationale for Design Constraints
 
-- 让引擎自行重建可保留 MED 格式和写入时序；适配器不实现 MED 序列化器。
-- 读、写、属性和搜索语义分别处理，避免“隐藏缓存”同时阻断引擎创建新文件。
-- 缓存字体名持久化到配置，使进程启动时能够判断磁盘内容是否匹配。
-- MED 后缀只用于已确认 DxLib 的资源路由，身份仍由模块内运行时契约提供。
-- `GetFontData` 替换和磁盘缓存控制使用独立开关，便于按实际能力组合。
+- Letting the engine rebuild preserves the MED format and write timing; the adapter does not
+  implement a MED serializer.
+- Read, write, attribute, and search semantics are handled separately to prevent hiding the
+  cache from also blocking creation of a new file.
+- The cached font name is persisted in configuration so process startup can determine whether
+  disk content matches.
+- The MED suffix only routes resources for confirmed DxLib instances; identity still comes
+  from the runtime contract in the module.
+- `GetFontData` replacement and disk cache control use independent switches, allowing them to
+  be combined according to actual capabilities.
 
-## 配置
+## Configuration
 
 - `EnableDxLibHook`
 - `DxLibDisableFontCache`
 - `DxLibReplaceFontDataQueries`
 - `DxLibClearRuntimeFontCacheOnSwitch`
-- `DxLibCachedFontNameW`：记录 `_FONTSET.MED` 对应的字体名
+- `DxLibCachedFontNameW`: records the font name corresponding to `_FONTSET.MED`
 
-## 运行约束
+## Runtime Constraints
 
-- 只分类游戏根目录的 `_FONTSET.MED` 和对应搜索模式。
-- 读路径、写路径和目录搜索分别处理，写入结果保持 DxLib 原生格式。
-- 模块标记查询限定在主模块已映射且可读的内存区域，检测结果在进程内缓存。
-- 字体选择器线程绕过缓存虚拟化。
-- 字体名称负责缓存一致性，文字编码由通用编码模块处理。
+- Only classify `_FONTSET.MED` in the game root directory and its corresponding search patterns.
+- Read paths, write paths, and directory searches are handled separately; writes retain the
+  native DxLib format.
+- Module marker queries are limited to mapped, readable memory regions of the main module;
+  detection results are cached within the process.
+- The font picker thread bypasses cache virtualization.
+- Font names maintain cache consistency; the general encoding module handles text encoding.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 在主模块映像中记录 DxLib 标记与 `CreateFontToHandle`、`DrawStringToHandle`、
-   `_FONTSET` 契约的命中结果。
-2. 对根目录 `_FONTSET.MED` 保存存在性、属性、只读打开、写入打开和目录搜索的返回值。
-3. 记录 `DxLibCachedFontNameW`、`ForcedFontNameW`、`DxLibDisableFontCache` 和
-   `ConfigVersion`，分别执行名称一致、名称不一致和缓存禁用场景。
-4. 通过 `DxLibShouldReplaceFontDataQueries` 记录完整 SFNT/单表查询是否进入通用字体数据路径。
-5. MED 文件由 DxLib 自身写入；证据只检查写入后的哈希和读取可见性。
+1. Record matches for DxLib markers and the `CreateFontToHandle`, `DrawStringToHandle`, and
+   `_FONTSET` contract in the main module image.
+2. For `_FONTSET.MED` in the root directory, retain existence, attributes, and return values
+   for read-only opens, write opens, and directory searches.
+3. Record `DxLibCachedFontNameW`, `ForcedFontNameW`, `DxLibDisableFontCache`, and `ConfigVersion`.
+   Run matching-name, mismatched-name, and disabled-cache scenarios separately.
+4. Through `DxLibShouldReplaceFontDataQueries`, record whether full SFNT/single-table queries
+   enter the general font data path.
+5. DxLib itself writes the MED file; evidence only checks the hash after writing and read
+   visibility.
 
-| 场景 | 预期结果 |
+| Scenario | Expected result |
 | --- | --- |
-| 身份契约通过、缓存名一致 | 读请求调用真实文件 API |
-| 身份契约通过、缓存名不一致 | 读/属性/搜索返回一致缺失语义，写入保持原路径 |
-| 仅有 `_FONTSET.MED` 后缀 | 身份不成立，所有请求透传 |
-| `DxLibReplaceFontDataQueries=0` | MED 路由仍按配置处理，SFNT 查询不替换 |
+| Identity contract passes; cached name matches | Read requests call the real file APIs |
+| Identity contract passes; cached name differs | Read/attribute/search requests return consistent missing-file semantics; writes retain the original path |
+| `_FONTSET.MED` suffix only | Identity is not confirmed; all requests pass through |
+| `DxLibReplaceFontDataQueries=0` | MED routing still follows configuration; SFNT queries are not replaced |
 
-证据材料包含路径哈希、字段快照、`[DEBUG][DxLib]` 采样、写入结果和非 DxLib 对照样本。
-通用记录模板见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+Evidence includes path hashes, field snapshots, `[DEBUG][DxLib]` samples, write results, and
+non-DxLib control samples. See
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md) for the common
+record template.
 
-## 验证
+## Verification
 
-覆盖已有缓存、缺少缓存、字体名一致、字体名变化、只读打开、写入重建、功能开关、
-配置保存、共享 MED 后缀和模块标记缺失的非 DxLib 程序。
+Cover existing caches, missing caches, matching font names, changed font names, read-only
+opens, rebuilds through writing, feature switches, configuration saving, shared MED suffixes,
+and non-DxLib programs without module markers.

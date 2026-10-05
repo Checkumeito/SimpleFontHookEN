@@ -253,13 +253,13 @@ static volatile LONG g_DWriteFactoryVtableHookState = 0;
 static volatile LONG g_DWriteCreateTextFormatTraceCount = 0;
 static volatile LONG g_DWriteCreateTextLayoutTraceCount = 0;
 
-// 新增：IDWriteFactory::CreateTextFormat 虚函数索引为 15
+// IDWriteFactory::CreateTextFormat occupies vtable slot 15.
 typedef HRESULT(STDMETHODCALLTYPE* pCreateTextFormat)(
     IDWriteFactory*, const WCHAR*, IDWriteFontCollection*, DWRITE_FONT_WEIGHT,
     DWRITE_FONT_STYLE, DWRITE_FONT_STRETCH, FLOAT, const WCHAR*, IDWriteTextFormat**);
 static pCreateTextFormat orgCreateTextFormat = NULL;
 
-// IDWriteFactory::CreateTextLayout 虚函数索引为 18
+// IDWriteFactory::CreateTextLayout occupies vtable slot 18.
 typedef HRESULT(STDMETHODCALLTYPE* pCreateTextLayout)(
     IDWriteFactory*, const WCHAR*, UINT32, IDWriteTextFormat*, FLOAT, FLOAT, IDWriteTextLayout**);
 static pCreateTextLayout orgCreateTextLayout = NULL;

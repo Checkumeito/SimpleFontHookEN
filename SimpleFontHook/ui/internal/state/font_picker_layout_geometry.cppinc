@@ -304,85 +304,73 @@ static int CharsetHitTest(int x, int y, int* outTotalWidth = nullptr) {
     return result;
 }
 
-// Spoof bar hit test: returns 0=toggle, 1=target charset, -1=none.
+struct PickerButtonRow {
+    const wchar_t* labels[4];
+    RECT rects[4];
+    HFONT fonts[4];
+    int count;
+};
+
+// Painting and input use the same fitted font and measured rectangles. Fit the
+// complete row, so a long preset cannot push its final button outside the window.
+static void LayoutPickerButtonRow(HDC hdc, PickerButtonRow& row, int top, int width) {
+    HGDIOBJ original = GetCurrentObject(hdc, OBJ_FONT);
+    for (int height = min(SF(11), 20); height >= 1; --height) {
+        int x = 10;
+        int tallest = 0;
+        for (int i = 0; i < row.count; ++i) {
+            row.fonts[i] = GetCachedPickerFont(L"Segoe UI", height, 0,
+                i % 2 == 0 ? FW_BOLD : FW_NORMAL, DEFAULT_CHARSET);
+            SelectObject(hdc, row.fonts[i]);
+            SIZE extent = {};
+            GetTextExtentPoint32W(hdc, row.labels[i], (int)wcslen(row.labels[i]), &extent);
+            row.rects[i] = MakeUiRect(x, top, x + extent.cx + 16, top + 24);
+            x = row.rects[i].right + 8;
+            tallest = max(tallest, (int)extent.cy);
+        }
+        if (row.rects[row.count - 1].right <= width - 10 && tallest <= 20) break;
+    }
+    SelectObject(hdc, original);
+}
+
+static PickerButtonRow GetSpoofButtonRow(HDC hdc) {
+    PickerButtonRow row = {};
+    row.count = 2;
+    row.labels[0] = SpoofToggleLabel();
+    row.labels[1] = g_spoofCharsets[g_spoofCharsetIdx].shortLabel;
+    int top = TITLE_HEIGHT + SEARCH_HEIGHT + CHARSET_HEIGHT + (SPOOF_HEIGHT - 24) / 2;
+    LayoutPickerButtonRow(hdc, row, top, WINDOW_WIDTH);
+    return row;
+}
+
+static PickerButtonRow GetMappingButtonRow(HDC hdc) {
+    PickerButtonRow row = {};
+    row.count = 4;
+    row.labels[0] = MappingToggleLabel();
+    row.labels[1] = g_textSubstitutionModes[g_textSubstitutionModeIdx].label;
+    row.labels[2] = RedirectToggleLabel();
+    row.labels[3] = g_codepageRedirectPresets[g_codepageRedirectPresetIdx].label;
+    LayoutPickerButtonRow(hdc, row, GetTextSubTop() + (TEXTSUB_HEIGHT - 24) / 2, WINDOW_WIDTH);
+    return row;
+}
+
+static int PickerButtonRowHitTest(const PickerButtonRow& row, int x, int y) {
+    for (int i = 0; i < row.count; ++i)
+        if (PointInRect(x, y, row.rects[i])) return i;
+    return -1;
+}
+
+// Returns 0=toggle, 1=target charset, -1=none.
 static int SpoofBarHitTest(int x, int y) {
-    int spTop = TITLE_HEIGHT + SEARCH_HEIGHT + CHARSET_HEIGHT;
-    int py = spTop + (SPOOF_HEIGHT - 24) / 2;
-    if (y < py || y >= py + 24) return -1;
-
     HDC hdc = GetDC(NULL);
-    HFONT spFontBold = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_BOLD, DEFAULT_CHARSET);
-    HFONT spFont = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_NORMAL, DEFAULT_CHARSET);
-
-    int px = 10;
-    int result = -1;
-
-    // Toggle
-    {
-        HGDIOBJ old = SelectObject(hdc, spFontBold);
-        const wchar_t* label = g_spoofEnabled ? L"伪装: 开" : L"伪装: 关";  // 伪装: 开/关
-        SIZE sz; GetTextExtentPoint32W(hdc, label, (int)wcslen(label), &sz);
-        int bw = sz.cx + 16;
-        RECT r = { px, py, px + bw, py + 24 };
-        if (x >= r.left && x < r.right) result = 0;
-        px += bw + 8;
-        SelectObject(hdc, old);
-    }
-
-    // Target charset
-    {
-        HGDIOBJ old = SelectObject(hdc, spFont);
-        const wchar_t* charsetLabel = g_spoofCharsets[g_spoofCharsetIdx].shortLabel;
-        SIZE sz; GetTextExtentPoint32W(hdc, charsetLabel, (int)wcslen(charsetLabel), &sz);
-        int bw = sz.cx + 18;
-        RECT r = { px, py, px + bw, py + 24 };
-        if (result < 0 && x >= r.left && x < r.right) result = 1;
-        SelectObject(hdc, old);
-    }
-
+    int result = PickerButtonRowHitTest(GetSpoofButtonRow(hdc), x, y);
     ReleaseDC(NULL, hdc);
     return result;
 }
 
 static int TextSubstitutionHitTest(int x, int y) {
-    int top = GetTextSubTop();
-    int py = top + (TEXTSUB_HEIGHT - 24) / 2;
-    if (y < py || y >= py + 24) return -1;
-
     HDC hdc = GetDC(NULL);
-    HFONT fontBold = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_BOLD, DEFAULT_CHARSET);
-    HFONT font = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_NORMAL, DEFAULT_CHARSET);
-    HGDIOBJ old = SelectObject(hdc, fontBold);
-
-    int px = 10;
-    int result = -1;
-    const wchar_t* toggleLabel = g_textSubstitutionEnabled ? L"\x6620\x5C04: \x5F00" : L"\x6620\x5C04: \x5173";
-    SIZE sz; GetTextExtentPoint32W(hdc, toggleLabel, (int)wcslen(toggleLabel), &sz);
-    RECT r = { px, py, px + sz.cx + 16, py + 24 };
-    if (x >= r.left && x < r.right) result = 0;
-    px = r.right + 8;
-
-    SelectObject(hdc, font);
-    const wchar_t* modeLabel = g_textSubstitutionModes[g_textSubstitutionModeIdx].label;
-    GetTextExtentPoint32W(hdc, modeLabel, (int)wcslen(modeLabel), &sz);
-    r = { px, py, px + sz.cx + 16, py + 24 };
-    if (result < 0 && x >= r.left && x < r.right) result = 1;
-    px = r.right + 10;
-
-    SelectObject(hdc, fontBold);
-    const wchar_t* redirectLabel = g_codepageRedirectEnabled ? L"\x8F6C\x7801: \x5F00" : L"\x8F6C\x7801: \x5173";
-    GetTextExtentPoint32W(hdc, redirectLabel, (int)wcslen(redirectLabel), &sz);
-    r = { px, py, px + sz.cx + 16, py + 24 };
-    if (result < 0 && x >= r.left && x < r.right) result = 2;
-    px = r.right + 8;
-
-    SelectObject(hdc, font);
-    const wchar_t* redirectPreset = g_codepageRedirectPresets[g_codepageRedirectPresetIdx].label;
-    GetTextExtentPoint32W(hdc, redirectPreset, (int)wcslen(redirectPreset), &sz);
-    r = { px, py, px + sz.cx + 16, py + 24 };
-    if (result < 0 && x >= r.left && x < r.right) result = 3;
-
-    SelectObject(hdc, old);
+    int result = PickerButtonRowHitTest(GetMappingButtonRow(hdc), x, y);
     ReleaseDC(NULL, hdc);
     return result;
 }

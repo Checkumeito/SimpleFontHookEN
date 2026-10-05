@@ -1,96 +1,118 @@
-# Escu:de 适配器
+# Escu:de Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 Escu:de `configure.cfg` 中字体选项的运行时视图。适配器通过 Win32 Profile
-API 返回当前替换字体，使引擎进入可由通用 GDI 钩子处理的字体分支。
+This directory provides a runtime view of the font options in Escu:de's `configure.cfg`. The
+adapter returns the current replacement font through the Win32 Profile APIs, directing the
+engine into a font branch that the generic GDI hooks can handle.
 
-## 通用路径覆盖范围
+## Coverage of the Generic Path
 
-Escu:de 在创建字体前从 `configure.cfg` 读取 `[Font]` 选项。这个配置值决定引擎选择哪条
-字体路径，因此仅拦截 GDI 创建阶段无法保证引擎进入系统字体分支。直接修改根目录或用户
-目录中的配置文件还会改变游戏持久状态，并且不能覆盖进程内热切换。
+Escu:de reads the `[Font]` options from `configure.cfg` before creating a font. This configuration
+value determines which font path the engine selects, so intercepting only GDI font creation
+cannot guarantee that the engine enters the system-font branch. Editing the configuration file
+in the root or user directory would also change the game's persistent state and would not cover
+font switching within the process.
 
-适配器在 Profile API 边界提供只对目标节、目标键和目标产品生效的虚拟值。引擎按照
-自己的配置读取流程进入 GDI 路径，磁盘配置和其他 Profile 请求保持原语义。
+The adapter provides virtual values at the Profile API boundary, limited to the target section,
+keys, and product. The engine enters the GDI path through its own configuration-reading flow;
+the on-disk configuration and other Profile requests retain their original semantics.
 
-## 检测条件
+## Detection Conditions
 
-根目录配置或当前 Profile API 实际请求的 `configure.cfg` 在 `[General]` 节提供：
+The root configuration, or the `configure.cfg` actually requested by the current Profile API
+call, provides the following in its `[General]` section:
 
 - `Company=ESCUDE`
-- 非空的 `Product`
+- A nonempty `Product`
 
-产品名用于识别根目录配置和 `Documents/ESCUDE/<Product>/configure.cfg` 用户配置。用户
-配置可以作为首次身份来源，因此资源位于用户目录时也能完成识别。
+The product name identifies the root configuration and the user configuration at
+`Documents/ESCUDE/<Product>/configure.cfg`. The user configuration can be the initial source of
+identity evidence, so identification also works when the resources are in the user directory.
 
-## 文件入口
+## File Entry Points
 
-- `escude_config.cppinc`：引擎检测、配置路径识别和 Profile API 返回值处理。
-- `newGetPrivateProfileStringA/W`：提供 `[Font] Face` 与 `[Font] Font` 的虚拟值。
-- 通用 Profile API Detours：把其他节和键交给真实 API。
+- `escude_config.cppinc`: Engine detection, configuration-path identification, and Profile API return-value handling.
+- `newGetPrivateProfileStringA/W`: Provides virtual values for `[Font] Face` and `[Font] Font`.
+- Generic Profile API Detours: Passes other sections and keys to the real API.
 
-## 实现原理
+## Implementation
 
-1. 读取候选 `configure.cfg` 的 `[General]`，以 `Company=ESCUDE` 和非空 `Product`
-   共同确认身份。
-2. 产品名派生根目录配置和 `Documents/ESCUDE/<Product>/configure.cfg` 的允许路径。
-3. Profile 钩子同时匹配文件、节名、键名、字体总开关和虚拟配置开关。
-4. 命中 `[Font] Face` 或 `[Font] Font` 时，按 A/W 调用返回对应 `ForcedFontName`。
-5. 复制函数复现 Win32 缓冲区截断、终止符和返回长度语义；未命中请求调用 `org*` API。
+1. Read `[General]` from a candidate `configure.cfg` and confirm identity using both
+   `Company=ESCUDE` and a nonempty `Product`.
+2. Derive the allowed root configuration path and
+   `Documents/ESCUDE/<Product>/configure.cfg` path from the product name.
+3. The Profile hook matches the file, section name, key name, master font switch, and virtual
+   configuration switch together.
+4. When `[Font] Face` or `[Font] Font` matches, return the corresponding `ForcedFontName` for the
+   A/W call.
+5. The copy functions reproduce Win32 buffer-truncation, terminator, and return-length semantics;
+   unmatched requests call the `org*` APIs.
 
-## 功能
+## Features
 
-- 同时支持 ANSI 与 Unicode Profile API。
-- 识别游戏根目录和当前产品的用户配置路径。
-- 为 `[Font]` 节的 `Face`、`Font` 键返回 `ForcedFontNameA/W`。
-- 保持 Win32 Profile API 的缓冲区长度、截断和返回值语义。
-- 使用有限日志记录产品、配置路径和字体值。
+- Supports both ANSI and Unicode Profile APIs.
+- Identifies the game-root and current product's user-configuration paths.
+- Returns `ForcedFontNameA/W` for the `Face` and `Font` keys in the `[Font]` section.
+- Preserves Win32 Profile API buffer-length, truncation, and return-value semantics.
+- Uses bounded logging to record the product, configuration path, and font value.
 
-## 设计约束依据
+## Rationale for the Design Constraints
 
-- 在读取边界提供视图，既覆盖根目录与用户目录配置，也保持磁盘文件不受运行时选择影响。
-- 公司与产品共同构成身份，`configure.cfg` 文件名只负责候选定位。
-- A/W 入口共享相同的身份和路径状态，字符串复制分别遵循对应 Win32 契约。
-- 字体选择器线程读取真实配置，避免 UI 自己消费为游戏准备的虚拟值。
-- Profile 整数和无关节键完全透传，使适配面限定在两个字体字符串。
+- Providing a view at the read boundary covers both root and user configurations while keeping
+  runtime font selection from affecting the on-disk files.
+- The company and product together establish identity; the `configure.cfg` filename only
+  locates candidates.
+- A/W entry points share the same identity and path state, while string copying follows the
+  corresponding Win32 contract for each entry point.
+- The font-picker thread reads the real configuration so the UI does not consume the virtual
+  values intended for the game.
+- Profile integer reads and unrelated sections and keys pass through entirely, limiting the
+  adaptation surface to two font strings.
 
-## 配置
+## Configuration
 
 - `EnableEscudeHook`
 - `EscudeVirtualFontConfig`
 - `EnableFontHook`
 - `EnableFaceNameReplace`
-- `ForcedFontNameA`、`ForcedFontNameW`
+- `ForcedFontNameA`, `ForcedFontNameW`
 
-## 运行约束
+## Runtime Constraints
 
-- 公司、产品、节名、键名和配置路径全部匹配后提供虚拟字体值。
-- 字体选择器线程使用真实配置读取路径。
-- Profile 整数读取和无关字符串读取保持系统 API 行为。
-- 已确认的产品名和身份按进程生命周期缓存；动态配置请求可在根目录探测完成后补充身份。
+- Virtual font values are provided only after the company, product, section name, key name, and
+  configuration path all match.
+- The font-picker thread uses the real configuration-reading path.
+- Profile integer reads and unrelated string reads retain system API behavior.
+- Confirmed product names and identity are cached for the process lifetime; dynamic
+  configuration requests can supplement identity after root-directory probing completes.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 固定根目录和用户目录的 `configure.cfg`，记录 `[General]` 的 `Company`、`Product`、
-   文件哈希和实际 Profile API 路径。
-2. 分别调用 `newGetPrivateProfileStringA/W` 读取 `[Font] Face`、`[Font] Font`，保存缓冲
-   区长度为 `0`、`1`、正常长度和截断长度时的返回值与终止符。
-3. 对其他节、其他键、整数读取、写入请求和非匹配产品调用真实 `org*` API，并记录结果。
-4. 将 `ForcedFontNameA/W`、总开关、虚拟配置开关和 `ConfigVersion` 纳入每条日志。
+1. Fix the root and user-directory copies of `configure.cfg`, and record `[General]`'s `Company`
+   and `Product`, file hashes, and actual Profile API paths.
+2. Call `newGetPrivateProfileStringA/W` separately to read `[Font] Face` and `[Font] Font`. Save
+   the return values and terminators for buffer lengths of `0`, `1`, a normal length, and a
+   truncating length.
+3. Call the real `org*` APIs for other sections, other keys, integer reads, write requests, and
+   nonmatching products, and record the results.
+4. Include `ForcedFontNameA/W`, the master switch, the virtual configuration switch, and
+   `ConfigVersion` in each log entry.
 
-| 场景 | 预期结果 |
+| Scenario | Expected Result |
 | --- | --- |
-| `Company=ESCUDE` 且 `Product` 非空 | 根目录/用户路径获得身份候选 |
-| 缺少任一身份字段 | Profile 请求透传 |
-| A/W 字体键命中 | 返回对应编码的替换字体，并保持缓冲区语义 |
-| 其他键或写入 | 返回真实 Profile 结果 |
-| 任一开关关闭 | 不提供虚拟字体值 |
+| `Company=ESCUDE` and a nonempty `Product` | The root/user path becomes an identity candidate |
+| Either identity field is missing | Profile requests pass through |
+| An A/W font key matches | Returns the replacement font in the corresponding encoding, preserving buffer semantics |
+| Other keys or writes | Returns the real Profile result |
+| Any switch is disabled | No virtual font value is provided |
 
-证据目录包含两种路径的配置哈希、A/W 返回值、截断测试、`[DEBUG][Escude]` 日志和非目标
-配置。记录模板见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains configuration hashes for both paths, A/W return values,
+truncation tests, `[DEBUG][Escude]` logs, and nontarget configurations. For the record template,
+see [Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-覆盖根目录配置、用户配置、ANSI/Unicode 调用、`Face`/`Font` 键、缓冲区截断、功能
-开关、其他节键和具有同名配置文件的非 Escu:de 程序。
+Cover root and user configurations, ANSI/Unicode calls, the `Face`/`Font` keys, buffer truncation,
+feature switches, other sections and keys, and non-Escu:de programs with a configuration file of
+the same name.

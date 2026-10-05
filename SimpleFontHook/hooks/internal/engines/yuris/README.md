@@ -1,266 +1,308 @@
-# YU-RIS 适配器
+# YU-RIS Adapter
 
-## 职责
+## Responsibilities
 
-YU-RIS 适配器负责处理引擎从 YPF 归档读取预渲染字体页的路径。适配器在身份、归档
-结构、字体页布局和解码入口全部匹配时，将 `Config::SourceFontNameW` 栅格化为对应
-的 32 位图集，并把图集写入 YU-RIS 的 WebP、PNG 或 YDG 解码缓冲区。
+The YU-RIS adapter handles the path by which the engine reads prerendered font pages from YPF
+archives. When identity, archive structure, font-page layout, and decoder entry points all match,
+the adapter rasterizes `Config::SourceFontNameW` into the corresponding 32-bit atlas and writes
+it into YU-RIS's WebP, PNG, or YDG decode buffers.
 
-资源识别、图集生成和解码替换属于字体资源路径；脚本编码、代码页转换、文字映射以及
-普通图片处理属于其他模块。适配器只处理已登记的字体页，其他资源交给默认解码器。
+Resource identification, atlas generation, and decode replacement belong to the font-resource
+path; script encoding, code-page conversion, text mapping, and ordinary image handling belong
+to other modules. The adapter handles only registered font pages and sends other resources to
+the default decoder.
 
-## 入口与依赖
+## Entry Points and Dependencies
 
-| 文件 | 作用 |
+| File | Purpose |
 | --- | --- |
-| `yuris_font.cppinc` | 按顺序聚合本目录实现；不单独编译 |
-| `yuris_state.cppinc` | 运行状态、资源类型、配置快照、目录索引和有界缓存 |
-| `yuris_profiles.cppinc` | 代码页候选、字节布局、图集尺寸、像素顺序和样式集合 |
-| `yuris_catalog.cppinc` | YPF v500 目录解码、资源目录建立和能力确认 |
-| `yuris_renderer.cppinc` | 使用 GDI `GGO_GRAY8_BITMAP` 生成字体页像素 |
-| `yuris_runtime.cppinc` | WebP/PNG/YDG 入口、分块聚合、配置通知、窗口刷新和生命周期 |
+| `yuris_font.cppinc` | Aggregates this directory's implementation in order; not compiled separately |
+| `yuris_state.cppinc` | Runtime state, resource types, configuration snapshots, catalog index, and bounded caches |
+| `yuris_profiles.cppinc` | Code-page candidates, byte layouts, atlas dimensions, pixel order, and style sets |
+| `yuris_catalog.cppinc` | YPF v500 directory decoding, resource-catalog construction, and capability confirmation |
+| `yuris_renderer.cppinc` | Generates font-page pixels using GDI `GGO_GRAY8_BITMAP` |
+| `yuris_runtime.cppinc` | WebP/PNG/YDG entry points, chunk aggregation, configuration notifications, window refresh, and lifecycle |
 
-`hooks/font_hooks.cpp` 将本目录分片加入聚合翻译单元。适配器依赖 `EngineCommon` 的
-模块与路径查询、`Config` 的字体配置、GDI 字体 API 和 `HookWorkerThreadState` 工作线程。
-文件隐藏、虚拟属性和资源重定向统一由 `engine_file_dispatch.cppinc` 处理，本适配器不
-复制该分派器的逻辑。
+`hooks/font_hooks.cpp` includes this directory's fragments in the aggregate translation unit.
+The adapter depends on `EngineCommon` module and path queries, `Config` font settings, GDI font
+APIs, and `HookWorkerThreadState` worker threads. File hiding, virtual attributes, and resource
+redirection are handled uniformly by `engine_file_dispatch.cppinc`; this adapter does not
+duplicate that dispatcher's logic.
 
-## 身份、能力与路由
+## Identity, Capabilities, and Routing
 
-适配器将三个判断阶段分开处理：
+The adapter handles three decision stages separately:
 
-1. **身份确认**：主模块同时包含 `ysbin\\yscfg.ybn` 和 `yu-ris1` 时确认 YU-RIS 运行时。
-2. **能力确认**：工作线程枚举 `pac/*.ypf`，解析 YPF `0x1F4` 目录，按登记的资源配置
-   检查完整路径、页号、样式、图片尺寸和解码模块。
-3. **资源路由**：身份与能力成立后，按压缩尺寸、FNV-1a 指纹或 YDG 分块指纹定位
-   字体页；未命中的请求调用默认解码器。
+1. **Identity confirmation**: Confirm the YU-RIS runtime when the main module contains both
+   `ysbin\\yscfg.ybn` and `yu-ris1`.
+2. **Capability confirmation**: The worker thread enumerates `pac/*.ypf`, parses YPF `0x1F4`
+   directories, and checks complete paths, page numbers, styles, image dimensions, and decoder
+   modules against registered resource profiles.
+3. **Resource routing**: After identity and capability are established, locate font pages using
+   compressed sizes, FNV-1a fingerprints, or YDG chunk fingerprints; unmatched requests call
+   the default decoder.
 
-文件名、`.ypf` 后缀和归档提示名只用于候选顺序或资源分类。目录字段会按归档首选值、
-进程 ACP/OEM、UTF-8 和已安装 Windows 代码页尝试解码；目录编码结论不参与字体页的
-双字节代码页选择。
+Filenames, the `.ypf` extension, and archive hint names affect only candidate ordering or
+resource classification. Directory fields are decoded by trying the archive's preferred value,
+the process ACP/OEM, UTF-8, and installed Windows code pages. The directory-encoding conclusion
+does not participate in double-byte code-page selection for font pages.
 
-能力确认还包括解码入口：
+Capability confirmation also includes decoder entry points:
 
-- WebP：`YSWBP.DLL` ordinal 3。
-- PNG：`YSPNG.DLL` ordinal 1、2。
-- Relirium/YDG：x86 主模块中唯一匹配登记函数签名的 QOI 解码核心。
+- WebP: `YSWBP.DLL` ordinal 3.
+- PNG: `YSPNG.DLL` ordinals 1 and 2.
+- Relirium/YDG: The QOI decode core in the x86 main module that uniquely matches the registered function signature.
 
-单图片配置按压缩尺寸与完整 FNV-1a 指纹分类。YDG 配置按完整分块序列分类，四个分块
-需要在同一输出图集基址下匹配同一字体页；分块到达顺序和重复分块不会改变分类结果。
+Single-image profiles are classified by compressed size and the complete FNV-1a fingerprint.
+YDG profiles are classified by the complete chunk sequence: four chunks must match the same
+font page at the same output-atlas base address. Chunk arrival order and duplicate chunks do
+not change the classification result.
 
-## 处理流程
+## Processing Flow
 
-1. `IsIdentityConfirmed` 缓存主模块身份结果。
-2. `Start` 创建 `yuris-catalog` 工作线程，扫描候选 YPF 并构建目录索引和兼容页表。
-3. `InstallInOpenDetourTransaction` 在 x86 目标中登记并挂接 Relirium 的 QOI 核心；
-   `MaybeWrapGetProcAddress` 按模块名和 ordinal 返回 WebP/PNG 包装入口。
-4. WebP 和 PNG 入口先调用默认解码器，再以目录索引判断字体页；YDG 入口收集四个分块，
-   完成唯一匹配后才写回图集像素。
-5. `RenderCatalogEntry` 使用 GDI 字形栅格化，检查 `Config::ConfigVersion`，把结果存入
-   固定容量的图集缓存。
-6. `NotifyConfigChanged` 清理待处理分块和图集缓存，向本进程窗口发布 `WM_FONTCHANGE`
-   并请求重绘。渲染期间如果快照版本不同，结果直接丢弃并交给默认解码器。
-7. `Stop` 停止目录线程、清理待处理 YDG 图集和图集缓存。
+1. `IsIdentityConfirmed` caches the main-module identity result.
+2. `Start` creates the `yuris-catalog` worker thread, which scans candidate YPFs and builds the
+   catalog index and compatible page tables.
+3. `InstallInOpenDetourTransaction` registers and attaches Relirium's QOI core in x86 targets;
+   `MaybeWrapGetProcAddress` returns WebP/PNG wrapper entry points by module name and ordinal.
+4. WebP and PNG entry points call the default decoder first, then use the catalog index to
+   identify font pages. The YDG entry point collects four chunks and writes atlas pixels back
+   only after a unique match is complete.
+5. `RenderCatalogEntry` uses GDI glyph rasterization, checks `Config::ConfigVersion`, and stores
+   results in a fixed-capacity atlas cache.
+6. `NotifyConfigChanged` clears pending chunks and the atlas cache, posts `WM_FONTCHANGE` to
+   windows in the current process, and requests repainting. If the snapshot version differs
+   during rendering, discard the result and use the default decoder.
+7. `Stop` stops the catalog thread and clears pending YDG atlases and the atlas cache.
 
-## 资源配置
+## Resource Profiles
 
-表中的代码页是结构自动模式的首选值。启动阶段会枚举已安装 Windows 代码页，只保留能
-按字节布局生成完整页数、槽数和保留位的候选；`YurisAtlasCodepage` 只在这些候选中选择
-页表，不改变归档布局。
+The code pages in the table are preferred values for structural automatic mode. At startup,
+the adapter enumerates installed Windows code pages and keeps only candidates that can produce
+the complete page counts, slot counts, and reserved positions for the byte layout.
+`YurisAtlasCodepage` selects a page table only from these candidates and does not change the
+archive layout.
 
-| 配置名 | 目录契约 | 页槽 | 画布与网格 | 首选代码页 |
+| Profile Name | Directory Contract | Page Slots | Canvas and Grid | Preferred Code Page |
 | --- | --- | --- | --- | ---: |
-| `cp932-s38` | `源ノ角ゴシック[_样式]/fnt_s38_nN.webp`，45 页 × 8 样式，文件直接位于样式目录 | CP932 双字节页，每页 188 槽，无效槽为 `U+FF65` | 1024x640，起点 `(5,11)`，19×10 个 48 px 单元格，字框 38 px | 932 |
-| `gbk-s38` | 127 页 × 普通/粗体，`fnt_s38_nN.webp` 位于 `38/` 子目录 | 第 1–126 页使用 GBK 首字节 `0x81–0xFE`，每页 192 槽；第 127 页为 ASCII `0x20–0x7E` | 816x624，起点 `(5,11)`，16×12 个 48 px 单元格，字框 38 px | 936 |
-| `big5-c20` | `font_c20/fnt_s20_nN.png`，89 页普通样式 | 首字节 `0xA1–0xF9`；次字节 `0x40–0x7E`、`0xA1–0xFE`，第 64/65 格留空 | 720x400，起点 `(6,9)`，16×10 个 30 px 单元格，字框 20 px | 950 |
-| `big5-c10` | `font_c10/fnt_s10_nN.png`，38 页普通样式 | 与 `big5-c20` 相同的双字节槽布局 | 720x400，起点 `(8,10)`，16×10 个 26 px 单元格，字框 10 px | 950 |
-| `big5-c10-89+ascii` | `font_c10/fnt_s10_nN.png`，90 页 | 第 1–89 页为 Big5，第 90 页为 ASCII | 720x400，起点 `(8,10)`，16×10 个 26 px 单元格，字框 10 px | 950 |
-| `big5-c20-89+ascii` | `font_c20/fnt_s20_nN.png`，90 页 | 第 1–89 页为 Big5，第 90 页为 ASCII | 720x400，起点 `(6,9)`，16×10 个 30 px 单元格，字框 20 px | 950 |
-| `big5-c30-89+ascii` | `font_c30/fnt_s30_nN.png`，90 页 | 第 1–89 页为 Big5，第 90 页为 ASCII | 720x440，起点 `(6,11)`，16×10 个 40 px 单元格，字框 30 px | 950 |
-| `big5-c40-89+ascii` | `font_c40/fnt_s40_nN.png`，90 页 | 第 1–89 页为 Big5，第 90 页为 ASCII | 820x520，起点 `(7,13)`，16×10 个 50 px 单元格，字框 40 px | 950 |
-| `relirium-s38` | `源ノ角ゴシック[_样式]/38/fnt_s38_nN.ydg`，46 页 × 8 样式 | CP932 双字节页并含 `0xF0` 用户定义首字节页，每页 188 槽 | 1024x640，起点 `(5,11)`，19×10 个 48 px 单元格，字框 38 px | 932 |
-| `relirium-s31-bold` | `源ノ角ゴシック_太/31/fnt_s31_nN.ydg`，46 页 | 与 `relirium-s38` 相同 | 800x440，起点 `(5,10)`，19×10 个 41 px 单元格，字框 31 px | 932 |
-| `relirium-s31-bold-shadow-outline` | `源ノ角ゴシック_太影袋/31/fnt_s31_nN.ydg`，页 1、2、3、46 | 与 `relirium-s38` 相同 | 800x440，起点 `(5,10)`，19×10 个 41 px 单元格，字框 31 px | 932 |
+| `cp932-s38` | `源ノ角ゴシック[_style]/fnt_s38_nN.webp`, 45 pages × 8 styles, with files directly in the style directory | CP932 double-byte pages, 188 slots per page; invalid slots use `U+FF65` | 1024x640, origin `(5,11)`, 19×10 cells of 48 px, glyph box 38 px | 932 |
+| `gbk-s38` | 127 pages × regular/bold; `fnt_s38_nN.webp` is in a `38/` subdirectory | Pages 1–126 use GBK lead bytes `0x81–0xFE`, 192 slots per page; page 127 is ASCII `0x20–0x7E` | 816x624, origin `(5,11)`, 16×12 cells of 48 px, glyph box 38 px | 936 |
+| `big5-c20` | `font_c20/fnt_s20_nN.png`, 89 regular-style pages | Lead bytes `0xA1–0xF9`; trail bytes `0x40–0x7E`, `0xA1–0xFE`; slots 64/65 remain empty | 720x400, origin `(6,9)`, 16×10 cells of 30 px, glyph box 20 px | 950 |
+| `big5-c10` | `font_c10/fnt_s10_nN.png`, 38 regular-style pages | Same double-byte slot layout as `big5-c20` | 720x400, origin `(8,10)`, 16×10 cells of 26 px, glyph box 10 px | 950 |
+| `big5-c10-89+ascii` | `font_c10/fnt_s10_nN.png`, 90 pages | Pages 1–89 are Big5; page 90 is ASCII | 720x400, origin `(8,10)`, 16×10 cells of 26 px, glyph box 10 px | 950 |
+| `big5-c20-89+ascii` | `font_c20/fnt_s20_nN.png`, 90 pages | Pages 1–89 are Big5; page 90 is ASCII | 720x400, origin `(6,9)`, 16×10 cells of 30 px, glyph box 20 px | 950 |
+| `big5-c30-89+ascii` | `font_c30/fnt_s30_nN.png`, 90 pages | Pages 1–89 are Big5; page 90 is ASCII | 720x440, origin `(6,11)`, 16×10 cells of 40 px, glyph box 30 px | 950 |
+| `big5-c40-89+ascii` | `font_c40/fnt_s40_nN.png`, 90 pages | Pages 1–89 are Big5; page 90 is ASCII | 820x520, origin `(7,13)`, 16×10 cells of 50 px, glyph box 40 px | 950 |
+| `relirium-s38` | `源ノ角ゴシック[_style]/38/fnt_s38_nN.ydg`, 46 pages × 8 styles | CP932 double-byte pages including the `0xF0` user-defined lead-byte page, 188 slots per page | 1024x640, origin `(5,11)`, 19×10 cells of 48 px, glyph box 38 px | 932 |
+| `relirium-s31-bold` | `源ノ角ゴシック_太/31/fnt_s31_nN.ydg`, 46 pages | Same as `relirium-s38` | 800x440, origin `(5,10)`, 19×10 cells of 41 px, glyph box 31 px | 932 |
+| `relirium-s31-bold-shadow-outline` | `源ノ角ゴシック_太影袋/31/fnt_s31_nN.ydg`, pages 1, 2, 3, 46 | Same as `relirium-s38` | 800x440, origin `(5,10)`, 19×10 cells of 41 px, glyph box 31 px | 932 |
 
-### Big5 资源树
+### Big5 Resource Tree
 
-PNG 配置接受以下已登记目录：
+PNG profiles accept the following registered directories:
 
-- `cgsys_c\\font_c20`、`cgsys_c\\font_c10` 的直接布局；
-- `cgsys_c\\font\\font_c20`、`cgsys_c\\font\\font_c10` 的嵌套布局；
-- 混合四字号布局中的 `font_c10`、`font_c20`、`font_c30`、`font_c40`。
+- Direct layouts at `cgsys_c\\font_c20` and `cgsys_c\\font_c10`;
+- Nested layouts at `cgsys_c\\font\\font_c20` and `cgsys_c\\font\\font_c10`;
+- `font_c10`, `font_c20`, `font_c30`, and `font_c40` in the mixed four-size layout.
 
-标准四字号配置只读取严格命名的 `fnt_sNN_n1.png` 到 `fnt_sNN_n90.png`。带 `_`、`__`、
-`_old` 后缀的变体、单字图片目录、按钮图片以及空的解包目录不属于字体页。相同压缩载荷
-无法唯一确定字号或页码时，当前请求保留默认解码结果。
+The standard four-size profile reads only strictly named files from `fnt_sNN_n1.png` through
+`fnt_sNN_n90.png`. Variants with `_`, `__`, or `_old` suffixes, single-character image
+directories, button images, and empty unpacked directories are not font pages. When an
+identical compressed payload cannot uniquely identify a font size or page number, the current
+request retains the default decoded result.
 
-### 字形样式与像素规则
+### Glyph Styles and Pixel Rules
 
-`FontToPicPreset` 集中定义 CP932/GBK 的合成样式：
+`FontToPicPreset` centrally defines the synthetic styles for CP932/GBK:
 
-| 目录标记 | 像素行为 |
+| Directory Marker | Pixel Behavior |
 | --- | --- |
-| `太` | 向右叠加 2 px，形成粗体遮罩 |
-| `影` | 使用 `(2, 1)` 黑色阴影 |
-| `袋` | 使用 1 px 黑色轮廓 |
+| `太` | Overlays 2 px to the right to form a bold mask |
+| `影` | Uses a black shadow at `(2, 1)` |
+| `袋` | Uses a 1 px black outline |
 
-GBK 的 `0x7F`、`0xFF` 和解码失败槽保持透明，槽位序号保持稳定。Big5 PNG 使用白色填充
-和 1 px `RGBA(75,75,75,224)` 轮廓。Relirium/YDG 使用已登记的 38/31 YDG 预设，
-包含左缘引号、底部省略号、点号光学居中和标点偏移。
+GBK slots for `0x7F`, `0xFF`, and failed decoding remain transparent, with stable slot indices.
+Big5 PNG uses white fill and a 1 px `RGBA(75,75,75,224)` outline. Relirium/YDG uses the registered
+38/31 YDG presets, including quotes aligned to the left edge, bottom-aligned ellipses, optical
+centering of dots, and punctuation offsets.
 
-标点定位按图集布局独立处理：
+Punctuation placement is handled independently for each atlas layout:
 
-- `cp932-s38`、`gbk-s38` 保留 `GLYPHMETRICS::gmptGlyphOrigin`、字体 bearing 和基线；
-  `gbk-s38` 使用 `(5,4)` GDI 绘制偏移及 3 px 顶部透明区。
-- Big5 使用 PNG 图集约定的全角 bearing：反引号和句号贴左下，逗号到问叹号水平居中，
-  成对引号和书名号使用各自锚点，省略号与点号在字框中线光学居中。
-- Relirium/YDG 对 `，、。．；：！？` 使用左 2 px、下 1 px 偏移；引号与角分秒符号贴左，
-  `…⋯` 贴底，`‥・·•･‧` 使用 YDG 光学居中。
+- `cp932-s38` and `gbk-s38` preserve `GLYPHMETRICS::gmptGlyphOrigin`, font bearings, and the
+  baseline; `gbk-s38` uses a `(5,4)` GDI drawing offset and a 3 px transparent top area.
+- Big5 uses the full-width bearing convention of the PNG atlas: backticks and periods align
+  to the bottom left, commas through question/exclamation marks are horizontally centered,
+  paired quotes and book-title brackets use their own anchors, and ellipses and dots are
+  optically centered on the glyph-box midline.
+- Relirium/YDG offsets `，、。．；：！？` 2 px left and 1 px down; quotes and angle
+  degree/minute/second symbols align to the left, `…⋯` align to the bottom, and `‥・·•･‧` use
+  YDG optical centering.
 
-字形、描边和阴影都限制在所属槽内。缺少码点时，先选择同类标点候补，再按图集代码页
-选择系统回退字体；字体 `.notdef` 图形不会写入图集。
+Glyphs, outlines, and shadows remain within their own slots. For missing code points, first
+select a similar punctuation alternative, then choose a system fallback font according to the
+atlas code page. Font `.notdef` glyphs are not written to the atlas.
 
-## 图集生成与字体来源
+## Atlas Generation and Font Sources
 
-渲染路径使用 `GGO_GRAY8_BITMAP` 取得字形灰度数据，再按配置的像素顺序写入：
+The rendering path obtains grayscale glyph data through `GGO_GRAY8_BITMAP`, then writes it in
+the profile's pixel order:
 
-- WebP：写入 `YSWBP` ordinal 3 约定的 BGRA 缓冲区；
-- PNG：写入 `YSPNG` ordinal 2 约定的 RGBA 行缓冲区；
-- YDG：写入已解码的 YDG RGBA 分块。
+- WebP: Writes to the BGRA buffer defined by `YSWBP` ordinal 3;
+- PNG: Writes to the RGBA row buffer defined by `YSPNG` ordinal 2;
+- YDG: Writes to decoded YDG RGBA chunks.
 
-运行时不生成临时图片、不调用 Python，也不重打包 YPF。图集缓存最多保存 12 个条目，
-缓存键包含目录条目、字符页表代码页和 `Config::ConfigVersion`，容量固定。
+The runtime does not generate temporary images, call Python, or repack YPFs. The atlas cache
+holds at most 12 entries with a fixed capacity. Cache keys include the catalog entry, character
+page-table code page, and `Config::ConfigVersion`.
 
-图集使用 `Config::SourceFontNameW` 选择 GDI face。系统字体、通过
-`AddFontResourceExW(..., FR_PRIVATE, ...)` 注册的 TTF/OTF/TTC，以及 TTC 中按 family/full
-name 选择的具体 face 共用同一入口。配置保存 TTC 的 face 名称，而不是集合文件名。
+Atlases select a GDI face using `Config::SourceFontNameW`. System fonts, TTF/OTF/TTC files
+registered through `AddFontResourceExW(..., FR_PRIVATE, ...)`, and specific TTC faces selected
+by family/full name share the same entry point. Configuration stores the TTC face name rather
+than the collection filename.
 
-## 配置快照与生命周期
+## Configuration Snapshots and Lifecycle
 
-`Config::ConfigVersion` 标识一次完整的字体配置快照。字体名称、字号倍率、字重、页表代码页
-和生成的像素都带有该版本：
+`Config::ConfigVersion` identifies a complete font-configuration snapshot. The font name,
+font-size scale, weight, page-table code page, and generated pixels all carry this version:
 
-1. 字体选择器发布配置通知，适配器清理待处理 YDG 分块和图集缓存。
-2. 解码请求按指定的 `SourceFontNameW`、高度倍率、字重和页表代码页生成资源。
-3. 适配器向本进程窗口发布 `WM_FONTCHANGE` 并请求重绘。
-4. 渲染结果提交前再次检查版本；版本不一致的结果直接丢弃。
-5. YU-RIS 已经上传到显存的纹理遵循引擎资源持有周期；请求按当前快照建立图集。
+1. The font picker publishes a configuration notification; the adapter clears pending YDG
+   chunks and the atlas cache.
+2. Decode requests generate resources using the specified `SourceFontNameW`, height scale,
+   weight, and page-table code page.
+3. The adapter posts `WM_FONTCHANGE` to windows in the current process and requests repainting.
+4. Recheck the version before committing a render result; discard results with mismatched versions.
+5. Textures that YU-RIS has already uploaded to video memory follow the engine's resource-holding
+   lifetime; requests build atlases from the current snapshot.
 
-`EnableFontHook=0` 时，WebP、PNG 和 YDG 入口保持默认解码行为。身份、能力、指纹或布局
-检查失败时也保持默认解码行为。
+When `EnableFontHook=0`, WebP, PNG, and YDG entry points retain default decoding behavior. They
+also retain default decoding behavior if identity, capability, fingerprint, or layout checks fail.
 
-## 配置
+## Configuration
 
-适配器使用字体选择器的通用配置，并通过 `FontHook.ini` 读取页表诊断覆盖键：
+The adapter uses generic font-picker settings and reads the page-table diagnostic override key
+through `FontHook.ini`:
 
-| 配置键 | 作用 |
+| Configuration Key | Purpose |
 | --- | --- |
-| `EnableFontHook` | 总开关；关闭时保持 YSWBP/YSPNG/YDG 的默认解码结果 |
-| `FontNameW` | 目标 face，运行时对应 `Config::SourceFontNameW` |
-| `EnableFontHeightScale` / `FontHeightScale1000` | 图集字号倍率，结果限制在 8 px 到当前单元格高度 |
-| `EnableFontWeight` / `FontWeight` | 基础字重；`太` 样式继续叠加合成粗体 |
-| `FontFileName` | 可选私有 TTF/OTF/TTC 文件，由通用字体加载器注册 |
-| `YurisAtlasCodepage` | `0` 使用结构自动结果；非零值选择已安装且与槽位布局兼容的代码页 |
+| `EnableFontHook` | Master switch; when disabled, retains default YSWBP/YSPNG/YDG decode results |
+| `FontNameW` | Target face, corresponding to `Config::SourceFontNameW` at runtime |
+| `EnableFontHeightScale` / `FontHeightScale1000` | Atlas font-size scale; results are limited to 8 px through the current cell height |
+| `EnableFontWeight` / `FontWeight` | Base weight; the `太` style still adds synthetic bolding |
+| `FontFileName` | Optional private TTF/OTF/TTC file, registered by the generic font loader |
+| `YurisAtlasCodepage` | `0` uses the structural automatic result; a nonzero value selects an installed code page compatible with the slot layout |
 
-字体选择器只呈现跨引擎配置，`YurisAtlasCodepage` 直接由 INI 管理。该边界避免页表覆盖与
-文字映射、字符集伪装或代码页重定向形成界面层关联。
+The font picker presents only cross-engine configuration; `YurisAtlasCodepage` is managed
+directly in the INI file. This boundary avoids UI-level coupling between page-table overrides
+and text mapping, character-set spoofing, or code-page redirection.
 
-`ForcedCharset=128` 只影响通用字体请求，不改变 YPF 页槽映射。`YurisAtlasCodepage` 只改变
-字节槽对应的 Unicode 字符，不改变页数、槽数、网格或归档条目。例如，SPIN!2 使用 GBK 时，
-45 页 × 188 槽布局无法容纳 GBK 的 126 个首字节页和 192 槽；代码页覆盖值 `936` 会被判为
-布局不兼容，当前请求保持默认解码结果并记录 `atlas-codepage override incompatible`。
+`ForcedCharset=128` affects only generic font requests, without changing YPF page-slot mapping.
+`YurisAtlasCodepage` changes only the Unicode characters corresponding to byte slots; it does
+not change page counts, slot counts, grids, or archive entries. For example, when SPIN!2 uses
+GBK, the 45-page × 188-slot layout cannot accommodate GBK's 126 lead-byte pages and 192 slots.
+The code-page override `936` is classified as layout-incompatible; the current request retains
+the default decoded result and records `atlas-codepage override incompatible`.
 
-Big5 字符只有在通用文字映射显式启用时才进入 Unicode 映射；字体选择始终由
-`Config::SourceFontNameW` 决定。目录编码首选 CP950，字体槽位使用标准 Big5 字符表；
-CP950 独有的 `A3E1`、`F9D6–F9FE` 保持空槽，11 个符号差异位使用标准 Big5 码点。
+Big5 characters enter Unicode mapping only when generic text mapping is explicitly enabled;
+font selection is always determined by `Config::SourceFontNameW`. Directory encoding prefers
+CP950, while font slots use the standard Big5 character table. CP950-only `A3E1` and `F9D6–F9FE`
+remain empty slots; the 11 positions with differing symbols use standard Big5 code points.
 
-## 不变量与运行约束
+## Invariants and Runtime Constraints
 
-- 身份确认使用主模块标记；通用 GDI 导入、扩展名和单个文件名不能单独判定 YU-RIS。
-- 只有完整命中 YPF 版本、目录路径、连续页号、样式集合、图片尺寸和解码入口的候选
-  才能建立能力目录。
-- 字体替换只写入已确认的字体页，不改变脚本编码、代码页重定向或普通图片。
-- 解码入口只读取缓存目录和有界状态，不执行磁盘扫描、归档解析或无界诊断输出。
-- 目录准备由工作线程完成；首次等待上限为 5 秒，超时请求回到默认解码器。
-- 字体创建、字形提取和缓存访问使用保存的 `org*` API，避免递归进入通用字体钩子。
-- 图集缓存容量固定为 12；版本、目录条目和页表代码页共同构成缓存身份。
-- 退出流程停止已启动的目录线程并释放事件、待处理分块和缓存；`DLL_PROCESS_DETACH`
-  的加载器锁路径只发布退出信号。
+- Identity confirmation uses main-module markers; generic GDI imports, extensions, or a single filename cannot establish YU-RIS identity alone.
+- Only candidates that completely match the YPF version, directory paths, consecutive page numbers, style set, image dimensions, and decoder entry points can establish a capability catalog.
+- Font replacement writes only confirmed font pages; it does not change script encoding, code-page redirection, or ordinary images.
+- Decoder entry points read only the cached catalog and bounded state; they do not scan disk, parse archives, or produce unbounded diagnostic output.
+- The worker thread prepares the catalog; the initial wait is limited to 5 seconds, after which requests fall back to the default decoder.
+- Font creation, glyph extraction, and cache access use saved `org*` APIs to avoid recursion into generic font hooks.
+- Atlas-cache capacity is fixed at 12; the version, catalog entry, and page-table code page together establish cache identity.
+- Shutdown stops the started catalog thread and releases events, pending chunks, and caches; the loader-lock path in `DLL_PROCESS_DETACH` only publishes a shutdown signal.
 
-## 离线生成工具
+## Offline Generation Tools
 
-离线脚本使用与运行时同名的显式预设，不接受任意编码猜测：
+Offline scripts use explicit presets with the same names as the runtime and do not accept
+arbitrary encoding guesses:
 
 ```powershell
 python font_to_pic.py --profile cp932-spin2 --font FONT_FILE --font-index TTC_FACE
 python font_to_pic.py --profile gbk-goodbye-world-index --font FONT_FILE --font-index TTC_FACE --output-root CGSYSF_ROOT
 ```
 
-`FONT_FILE` 支持 TTF、OTF、TTC 和 OTC，`TTC_FACE` 从 0 开始计数。GBK 预设在普通/粗体
-目录下创建 `38/` 子目录，CP932 预设保留直接样式目录输出。脚本及其规则文件只用于
-离线资源准备，不参与 DLL 编译和运行时解码。
+`FONT_FILE` supports TTF, OTF, TTC, and OTC; `TTC_FACE` is indexed from 0. The GBK preset creates a
+`38/` subdirectory under regular/bold directories, while the CP932 preset preserves output
+directly in style directories. The scripts and their rule files are only for offline resource
+preparation and do not participate in DLL compilation or runtime decoding.
 
-## 扩展步骤
+## Extension Steps
 
-1. 在 `yuris_profiles.cppinc` 定义明确的 `AtlasEncodingProfile`、`AtlasProfile` 或
-   `ArchiveProfile`，同时写出页数、槽位、目录路径、图片尺寸和解码入口契约。
-2. 在 `yuris_catalog.cppinc` 登记完整目录校验、指纹或分块匹配条件；身份、能力和资源
-   路由保持三个独立阶段。
-3. 在 `yuris_renderer.cppinc` 实现与布局绑定的像素顺序、标点定位和缺字回退规则，
-   不把其他配置的坐标算法直接复用到该图集。
-4. 在 `yuris_runtime.cppinc` 只挂接已确认的模块、ordinal 或函数签名，并让失败路径
-   返回默认解码结果；文件重定向仍经过 `engine_file_dispatch.cppinc`。
-5. 为正向样本、非目标程序、功能关闭、布局不完整、指纹歧义和快照切换准备验证记录。
+1. Define an explicit `AtlasEncodingProfile`, `AtlasProfile`, or `ArchiveProfile` in
+   `yuris_profiles.cppinc`, specifying contracts for page counts, slots, directory paths, image
+   dimensions, and decoder entry points together.
+2. Register complete directory validation, fingerprints, or chunk-matching conditions in
+   `yuris_catalog.cppinc`; keep identity, capabilities, and resource routing as three separate stages.
+3. Implement pixel order, punctuation placement, and missing-glyph fallback rules tied to the
+   layout in `yuris_renderer.cppinc`; do not directly reuse another profile's coordinate
+   algorithm for this atlas.
+4. In `yuris_runtime.cppinc`, attach only confirmed modules, ordinals, or function signatures,
+   and let failure paths return default decode results. File redirection still goes through
+   `engine_file_dispatch.cppinc`.
+5. Prepare verification records for positive samples, nontarget programs, feature disablement,
+   incomplete layouts, ambiguous fingerprints, and snapshot switching.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-### 静态身份与目录
+### Static Identity and Directory
 
-1. 固定主模块和 `pac/*.ypf` 的 SHA-256，记录架构、目录路径和配置快照。
-2. 在主模块可读映像中确认 `ysbin\\yscfg.ybn` 与 `yu-ris1` 的组合标记；只有单个标记的
-   样本作为非目标对照。
-3. 对候选 YPF 读取 `0x1F4` 目录，保存版本、索引长度、条目路径、页号、样式和图片尺寸。
-   目录编码依次记录归档首选值、ACP/OEM、UTF-8 和显式 Windows 代码页的解码结果。
-4. 按完整资源配置核对以下 profile 标识：`cp932-s38`、`gbk-s38`、
-   `big5-c20`/`big5-c10`、`big5-c10-89+ascii`、`big5-c20-89+ascii`、
-   `big5-c30-89+ascii`、`big5-c40-89+ascii`、`relirium-s38`、
-   `relirium-s31-bold`、`relirium-s31-bold-shadow-outline`。
+1. Fix SHA-256 hashes for the main module and `pac/*.ypf`; record architecture, directory paths,
+   and configuration snapshots.
+2. Confirm the combined `ysbin\\yscfg.ybn` and `yu-ris1` markers in the readable main-module image;
+   use samples with only one marker as nontarget controls.
+3. Read the `0x1F4` directory from candidate YPFs, saving the version, index length, entry paths,
+   page numbers, styles, and image dimensions. For directory encoding, record decoding results
+   in order for the archive's preferred value, ACP/OEM, UTF-8, and explicit Windows code pages.
+4. Check the following profile identifiers against complete resource profiles: `cp932-s38`,
+   `gbk-s38`, `big5-c20`/`big5-c10`, `big5-c10-89+ascii`, `big5-c20-89+ascii`,
+   `big5-c30-89+ascii`, `big5-c40-89+ascii`, `relirium-s38`, `relirium-s31-bold`, and
+   `relirium-s31-bold-shadow-outline`.
 
-### 运行时复刻
+### Runtime Reproduction
 
-1. 记录 `YSWBP.DLL` ordinal 3、`YSPNG.DLL` ordinal 1/2 和 x86 QOI 核心的绑定结果。
-2. 启动目录工作线程，保存 `identity confirmed`、`atlas encoding incompatible`、
-   `atlas encoding resolved`、`atlas encoding candidate`、`archive matched`、
-   `bitmap-font capability confirmed` 或 `capability unavailable` 的
-   单次日志及耗时。
-3. 对 WebP、PNG、YDG 各发送一份命中页和一份非字体资源，记录 `wrapped`、`rendered`、
-   分块聚合、版本号和默认解码回退。
-4. 对 `YurisAtlasCodepage` 设置自动值、兼容值和不兼容值，保存 `layout`、槽位数量、
-   实际代码页和 `atlas-codepage override incompatible` 结果。
-5. 使用 `font_to_pic.py` 的显式 profile 生成同一字体面，记录输入字体哈希、TTC face、
-   输出图集尺寸、像素格式和目录树；离线结果与运行时图集逐槽比较。
+1. Record binding results for `YSWBP.DLL` ordinal 3, `YSPNG.DLL` ordinal 1/2, and the x86 QOI core.
+2. Start the catalog worker thread. Save one-time logs and elapsed times for `identity confirmed`,
+   `atlas encoding incompatible`, `atlas encoding resolved`, `atlas encoding candidate`,
+   `archive matched`, `bitmap-font capability confirmed`, or `capability unavailable`.
+3. Send one matching page and one nonfont resource each to WebP, PNG, and YDG. Record `wrapped`,
+   `rendered`, chunk aggregation, version numbers, and default-decoder fallback.
+4. Set `YurisAtlasCodepage` to automatic, compatible, and incompatible values. Save `layout`,
+   slot counts, actual code pages, and `atlas-codepage override incompatible` results.
+5. Generate the same font face using an explicit `font_to_pic.py` profile. Record the input-font
+   hash, TTC face, output-atlas dimensions, pixel format, and directory tree; compare offline
+   output with runtime atlases slot by slot.
 
-| 场景 | 身份 | 能力/路由 | 预期结果 |
+| Scenario | Identity | Capability/Routing | Expected Result |
 | --- | --- | --- | --- |
-| 组合标记 + 完整 YPF profile + 解码入口 | 通过 | 通过 | 仅登记字体页被替换 |
-| 组合标记缺失 | 不通过 | 不评估 | WebP/PNG/YDG 使用默认解码 |
-| YPF 目录完整但 profile 不匹配 | 通过 | 不通过 | 记录原因并回退 |
-| 代码页覆盖与槽位不兼容 | 通过 | 路由拒绝 | 保持默认解码，不改变资源布局 |
-| 非字体图片或不完整 YDG 分块 | 通过 | 不命中 | 不写回图集 |
-| `EnableFontHook=0` | 不进入替换 | 不路由 | 保持 YPF 默认结果 |
-| 配置版本切换 | 通过 | 当前快照 | 版本不一致的渲染结果丢弃，缓存键含版本 |
+| Combined markers + complete YPF profile + decoder entry points | Passes | Passes | Only registered font pages are replaced |
+| Combined markers missing | Fails | Not evaluated | WebP/PNG/YDG use default decoding |
+| Complete YPF directory, but no matching profile | Passes | Fails | Records the reason and falls back |
+| Code-page override incompatible with slots | Passes | Routing rejected | Preserves default decoding without changing the resource layout |
+| Nonfont image or incomplete YDG chunks | Passes | No match | No atlas writeback |
+| `EnableFontHook=0` | Does not enter replacement | No routing | Preserves default YPF results |
+| Configuration-version switch | Passes | Current snapshot | Discards renders with mismatched versions; cache keys include the version |
 
-证据目录包含 YPF 索引摘要、profile 表、解码入口、逐槽图集哈希、`[Yuris]` 日志、
-配置快照和非目标样本。通用记录字段见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains YPF-index summaries, profile tables, decoder entry points,
+per-slot atlas hashes, `[Yuris]` logs, configuration snapshots, and nontarget samples. For generic
+record fields, see [Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-- 正向样本的诊断记录包含 `identity confirmed`、资源来源、扫描耗时、自动代码页、兼容
-  代码页数量、资源数量和页数；WebP、PNG、Relirium 分别记录对应的包装入口和图集替换。
-- 非 YU-RIS 程序、缺少登记字体页的程序、非字体 WebP/PNG 和不完整 YDG 分块不产生替换。
-- `EnableFontHook=0` 时画面使用 YPF 来源的默认解码结果。
-- 针对系统 face、TTC face 或页表代码页的验证，诊断记录包含对应的 `ConfigVersion`、实际 face
-  和实际代码页。
+- Positive-sample diagnostics include `identity confirmed`, resource sources, scan duration,
+  automatic code page, compatible-code-page count, resource count, and page count. WebP, PNG,
+  and Relirium each record their corresponding wrapper entry points and atlas replacement.
+- Non-YU-RIS programs, programs without registered font pages, nonfont WebP/PNG resources, and
+  incomplete YDG chunks produce no replacement.
+- When `EnableFontHook=0`, the display uses default decoded results from YPF sources.
+- For system-face, TTC-face, or page-table-code-page verification, diagnostics include the
+  corresponding `ConfigVersion`, actual face, and actual code page.
 
-YPF 目录字段和名称长度交换表参考 GARbro 的
-[ArcYPF.cs](https://github.com/morkt/GARbro/blob/master/ArcFormats/YuRis/ArcYPF.cs)。
+YPF directory fields and the filename-length exchange table reference GARbro's
+[ArcYPF.cs](https://github.com/morkt/GARbro/blob/master/ArcFormats/YuRis/ArcYPF.cs).

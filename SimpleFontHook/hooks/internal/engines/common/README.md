@@ -1,94 +1,118 @@
-# 引擎适配公共基础
+# Common Foundation for Engine Adaptation
 
-## 职责
+## Responsibilities
 
-本目录为各引擎适配器提供路径规范化、模块内存标记查询、运行时导出验证、归档魔数
-检查、系统字体定位、SFNT 校验、GDI 字体导出和临时只读句柄。公共接口只收集身份与
-能力证据或实现无引擎归属的字体/文件操作，不包含具体游戏名称和资源文件清单。
+This directory provides engine adapters with path normalization, module memory marker
+queries, runtime export validation, archive magic checks, system font location, SFNT
+validation, GDI font export, and temporary read-only handles. Common interfaces only collect
+identity and capability evidence or implement font/file operations that have no engine
+affiliation. They contain no specific game names or resource file lists.
 
-## 公共能力边界
+## Boundaries of Common Capabilities
 
-引擎检测与文件虚拟化位于全局 API 钩子上，路径边界、内存可读性或只读打开语义出现
-细微差异就会造成误判或递归。公共基础把这些规则实现为一套无引擎偏好的原语，使每个
-适配器只组合证据并定义自身资源契约。
+Engine detection and file virtualization run on global API hooks. Small differences in path
+boundaries, memory readability, or read-only open semantics can cause false matches or
+recursion. The common foundation implements these rules as engine-neutral primitives so
+each adapter only combines evidence and defines its own resource contract.
 
-## 身份证据
+## Identity Evidence
 
-`EngineIdentityPolicy::Confirm` 接受三类强证据：模块或专属格式身份标识、经过验证的
-运行时/资源契约，以及“归档格式解析成功并找到引擎资源”组合。文件扩展名和根目录
-文件名只用于缩小搜索范围，不参与独立判定。
+`EngineIdentityPolicy::Confirm` accepts three kinds of strong evidence: a module or proprietary
+format identity marker, a verified runtime/resource contract, and the combination of
+successfully parsing an archive format and finding engine resources inside it. File
+extensions and root-directory filenames only narrow the search and do not independently
+determine identity.
 
-`ConfirmFrameworkContract` 要求框架运行目录与身份清单同时成立。Ren'Py 和 TyranoScript
-使用该组合，单个目录、文件名或后缀只保留候选资格。
+`ConfirmFrameworkContract` requires both the framework runtime directory and the identity
+manifest to match. Ren'Py and TyranoScript use this combination; a single directory, filename,
+or suffix only keeps a candidate eligible.
 
-`Evidence` 把独立身份标记、已验证契约、容器格式、容器内引擎资源和框架清单分别表达。
-`Confirm` 只接受强证据，或“容器解析成立且找到引擎资源”的组合；`ConfirmCapability`
-在身份成立后继续判断目标接口是否可用。
+`Evidence` represents independent identity markers, verified contracts, container formats,
+engine resources within containers, and framework manifests separately. `Confirm` only
+accepts strong evidence or the combination of successful container parsing and engine
+resources found inside it. Once identity is confirmed, `ConfirmCapability` determines
+whether the target interface is available.
 
-## 路径接口
+## Path Interfaces
 
-`EngineCommon` 提供游戏根目录、完整路径、大小写与分隔符规范化、根目录边界、扩展名
-比较和 UTF-8 日志转换。各引擎使用同一套边界规则，文件分发器仍负责最终的 A/W API
-结果发布。
+`EngineCommon` provides the game root directory, full paths, case and separator normalization,
+root-directory boundaries, extension comparison, and UTF-8 log conversion. Every engine uses
+the same boundary rules; the file dispatcher remains responsible for publishing the final
+A/W API results.
 
-## 模块接口
+## Module Interfaces
 
-模块标记直接在已映射且可读的内存区域中查询，避免读取整份可执行文件。运行时接口
-通过已加载模块的导出表确认；动态模块尚未加载时保留可重试状态。
+Module markers are queried directly in mapped, readable memory regions to avoid reading the
+entire executable. Runtime interfaces are confirmed through the export tables of loaded
+modules. A dynamic module that has not loaded remains in a retryable state.
 
-## 字体与文件接口
+## Font and File Interfaces
 
-系统字体名称解析共享注册表缓存，根目录字体查找接受显式配置文件和标准 SFNT 扩展名。
-`engine_font_export.cppinc` 通过真实 GDI 入口导出当前配置字体，并统一执行大小上限、对象
-选择结果和 SFNT 头校验。虚拟资源使用删除即关闭的临时只读句柄交付给引擎。
-公共文件查询带线程级旁路标记，文件钩子直接转交真实 API，避免身份探测和字体来源解析
-再次进入引擎分派。
+System font name resolution shares a registry cache. Root-directory font searches accept
+explicitly configured files and standard SFNT extensions. `engine_font_export.cppinc` exports
+the currently configured font through real GDI entry points and consistently checks size
+limits, object selection results, and SFNT headers. Virtual resources are delivered to the
+engine through temporary read-only handles with delete-on-close semantics.
+Common file queries carry a thread-level bypass marker, so file hooks forward them directly
+to the real APIs and prevent identity probing and font source resolution from reentering
+engine dispatch.
 
-## 文件职责
+## File Responsibilities
 
-| 文件 | 职责 |
+| File | Responsibilities |
 | --- | --- |
-| `engine_identity_policy.h` | 身份、框架契约与能力确认规则，以及编译期反例 |
-| `engine_common.h/.cpp` | 路径、模块、导出、字体文件、SFNT 与内部查询保护 |
-| `engine_font_export.cppinc` | 从当前 GDI 配置导出并校验可交付的字体字节 |
+| `engine_identity_policy.h` | Identity, framework contract, and capability confirmation rules, plus compile-time counterexamples |
+| `engine_common.h/.cpp` | Paths, modules, exports, font files, SFNT, and internal query guards |
+| `engine_font_export.cppinc` | Export and validate deliverable font bytes from the current GDI configuration |
 
-## 工作原理
+## How It Works
 
-1. `InternalFileQueryScope` 为适配器自己的文件读取设置线程级旁路标记。
-2. 路径先转换为完整路径并规范化大小写与分隔符，再检查游戏根目录边界和扩展名。
-3. 模块标记查询逐段检查已提交、可读的映像内存，运行时能力则检查真实导出表。
-4. 字体来源按系统注册表缓存和游戏根目录候选定位，读取后校验 SFNT/TTC 头。
-5. 内存资源通过删除即关闭的临时文件句柄交给只接受 Win32 文件 API 的引擎。
+1. `InternalFileQueryScope` sets a thread-level bypass marker for an adapter's own file reads.
+2. Paths are first converted to full paths and normalized for case and separators, then
+   checked against the game root boundary and extension.
+3. Module marker queries inspect committed, readable image memory region by region; runtime
+   capabilities inspect the real export table.
+4. Font sources are located through the system registry cache and game-root candidates, then
+   their SFNT/TTC headers are validated after reading.
+5. In-memory resources are delivered through temporary file handles with delete-on-close
+   semantics to engines that only accept Win32 file APIs.
 
-这套流程把“收集证据”与“改变请求结果”分开。公共层只返回事实或通用资源，最终是否
-启用某个适配路径由具体引擎在配置、身份和能力同时成立后决定。
+This workflow separates evidence collection from changes to request results. The common
+layer only returns facts or general resources; each engine decides whether to enable an
+adaptation path after configuration, identity, and capabilities all match.
 
-## 运行约束
+## Runtime Constraints
 
-- 模块和归档检查由适配器缓存，文件及字体高频路径只读取缓存结果。
-- 归档后缀、资源后缀、通用 GDI 导入和任意单个文件名均不构成引擎身份。
-- 公共代码不安装钩子，也不改变字体、代码页或文字映射状态。
+- Adapters cache module and archive checks; high-frequency file and font paths only read
+  cached results.
+- Archive suffixes, resource suffixes, generic GDI imports, and any single filename do not
+  establish engine identity.
+- Common code does not install hooks or change font, code page, or text substitution state.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-复刻公共判断时直接以 `engine_identity_policy.h` 的 `Evidence`、`Confirm`、
-`ConfirmFrameworkContract`、`ConfirmCapability` 为决策入口，以 `engine_common.h/.cpp` 的
-路径和模块函数为输入边界。每次记录输入证据集合、规范化路径、返回布尔值和调用符号。
+To reproduce common decisions, use `Evidence`, `Confirm`, `ConfirmFrameworkContract`, and
+`ConfirmCapability` in `engine_identity_policy.h` as the decision entry points, and the path
+and module functions in `engine_common.h/.cpp` as input boundaries. Record the input evidence
+set, normalized path, returned Boolean value, and called symbol each time.
 
-| 输入组合 | 预期判定 |
+| Input combination | Expected decision |
 | --- | --- |
-| 单个文件后缀、归档名或 GDI 导入 | 身份不成立 |
-| 独立引擎标记 | 身份成立，能力单独判断 |
-| 容器头可解析且包含登记的引擎资源 | 容器组合证据成立 |
-| 容器头可解析但缺少引擎资源 | 身份不成立 |
-| 框架目录与身份清单同时成立 | 框架契约成立 |
-| `InternalFileQueryScope` 活动 | 文件请求调用真实 API |
+| A single file suffix, archive name, or GDI import | Identity is not confirmed |
+| Independent engine marker | Identity is confirmed; capabilities are evaluated separately |
+| Parseable container header containing registered engine resources | Combined container evidence is confirmed |
+| Parseable container header without engine resources | Identity is not confirmed |
+| Framework directory and identity manifest both match | Framework contract is confirmed |
+| `InternalFileQueryScope` is active | File requests call the real API |
 
-字体来源复刻使用系统字体、游戏目录字体、TTC、多面 TTC 和损坏 SFNT 五类固定输入，记录
-来源路径、字体面、大小上限、头校验和临时句柄访问权限。通用记录格式见
-[功能证据与复刻流程](../../../../../docs/reproduction.md)。
+Font source reproduction uses five fixed input categories: system fonts, game-directory
+fonts, TTC, multi-face TTC, and damaged SFNT. Record the source path, font face, size limit,
+header validation, and temporary handle access rights. See
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md) for the
+common record format.
 
-## 验证
+## Verification
 
-覆盖根目录内外路径、相对路径、大小写与分隔符、不可读模块页、缺失导出、系统与本地
-字体、损坏 SFNT、只读与写入打开，以及内部查询旁路的递归保护。
+Cover paths inside and outside the root directory, relative paths, case and separators,
+unreadable module pages, missing exports, system and local fonts, damaged SFNT, read-only
+and write opens, and recursion guards for internal query bypasses.

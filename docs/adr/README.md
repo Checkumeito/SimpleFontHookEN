@@ -1,75 +1,81 @@
-# 架构决策记录
+# Architecture Decision Records
 
-ADR 用于记录会长期约束多个模块、且维护者可能重新评估的设计决定。它解释约束来自
-哪里、选择当前方案的依据，以及方案需要哪些验证证据。局部实现细节、临时兼容参数和
-单个模块内的行为说明由源码与模块 README 维护。
+ADRs record design decisions that constrain multiple modules over the long term
+and may need reevaluation by maintainers. They explain where constraints come
+from, the basis for the current approach, and the verification evidence it needs.
+Source code and module README files maintain local implementation details,
+temporary compatibility parameters, and behavior within a single module.
 
-## ADR 的适用范围
+## ADR Scope
 
-架构取舍通常无法只从最终代码恢复。例如聚合翻译单元以内联状态换取封装边界，文件
-虚拟化以统一优先级换取集中耦合。ADR 保存取舍成立时的背景和代价，使评估能判断
-约束是否仍然存在，并把判断依据固定为可复核证据。
+Architectural tradeoffs often cannot be recovered from the final code alone.
+For example, aggregate translation units keep state local in exchange for
+encapsulation boundaries, while file virtualization accepts centralized coupling
+in exchange for unified priorities. ADRs preserve the context and cost of a
+tradeoff so reviews can determine whether its constraints still apply and tie
+that judgment to reproducible evidence.
 
-## 需要记录的情况
+## When to Record a Decision
 
-- 改变钩子聚合翻译单元策略。
-- 引入新的运行时依赖或代理加载方式。
-- 改变字体替换、字符集、代码页和文字映射之间的职责划分。
-- 建立新的跨引擎文件虚拟化或缓存刷新机制。
-- 接受一个代价已知且受兼容约束无法消除的方案。
+- Changing the aggregate translation unit strategy for hooks.
+- Introducing a new runtime dependency or proxy loading method.
+- Changing the separation of responsibilities among font replacement, charsets, code pages, and character mapping.
+- Establishing a new cross-engine file virtualization or cache refresh mechanism.
+- Accepting an approach with known costs that compatibility constraints prevent eliminating.
 
-## 命名
+## Naming
 
-文件名使用四位序号和简短英文标识：
+Use a four-digit sequence number and a short English identifier for filenames:
 
 ```text
 0001-single-hook-translation-unit.md
 0002-separate-font-and-codepage.md
 ```
 
-状态使用：`提议`、`已接受`、`已取代`、`已废弃`。已接受的 ADR 不直接重写结论；
-新决策应创建新 ADR，并在双方文档中建立取代关系。
+Use these statuses: `Proposed`, `Accepted`, `Superseded`, `Deprecated`. Do not
+directly rewrite the conclusion of an accepted ADR. Create a new ADR for a new
+decision and link the superseding relationship in both documents.
 
-## 内容边界
+## Content Boundaries
 
-- “背景”只写决策所依赖的事实与约束。
-- “决策”明确模块边界、接口和必须保持的不变量。
-- “后果”同时记录收益、成本、失败模式和维护责任。
-- “备选方案”说明未采用方案与当前约束的冲突点。
-- “验证”给出能够证伪决策假设的构建、测试或运行时检查。
-- “证据”列出文件、符号、命令、样本哈希和预期日志字段。
+- "Context" contains only the facts and constraints on which the decision depends.
+- "Decision" specifies module boundaries, interfaces, and required invariants.
+- "Consequences" records benefits, costs, failure modes, and maintenance responsibilities together.
+- "Alternatives" explains how rejected approaches conflict with the current constraints.
+- "Verification" specifies builds, tests, or runtime checks that can falsify the decision's assumptions.
+- "Evidence" lists files, symbols, commands, sample hashes, and expected log fields.
 
-## 模板
+## Template
 
 ```markdown
-# ADR-NNNN：标题
+# ADR-NNNN: Title
 
-- 状态：提议
-- 日期：YYYY-MM-DD
-- 取代：无
-- 被取代：无
+- Status: Proposed
+- Date: YYYY-MM-DD
+- Supersedes: None
+- Superseded by: None
 
-## 背景
+## Context
 
-需要处理的矛盾、约束和已知事实。
+Conflicts, constraints, and known facts that need to be addressed.
 
-## 决策
+## Decision
 
-最终采用的方案及其接口和不变量。
+The chosen approach, its interfaces, and its invariants.
 
-## 后果
+## Consequences
 
-带来的收益、代价、风险和维护要求。
+Benefits, costs, risks, and maintenance requirements.
 
-## 备选方案
+## Alternatives
 
-评估过但未采用的方案及原因。
+Approaches considered but not adopted, and the reasons.
 
-## 验证
+## Verification
 
-证明决策成立所需的构建、测试或运行时证据。
+Build, test, or runtime evidence needed to establish that the decision holds.
 
-## 证据
+## Evidence
 
-文件、符号、命令、样本哈希、配置快照和预期日志字段。
+Files, symbols, commands, sample hashes, configuration snapshots, and expected log fields.
 ```

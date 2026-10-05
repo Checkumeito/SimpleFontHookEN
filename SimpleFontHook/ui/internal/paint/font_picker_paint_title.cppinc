@@ -47,13 +47,14 @@ static void PaintTitleBar(HDC mem, const RECT& rc)
             active ? COL_ACCENT : MixColor(COL_BORDER, COL_TITLE_TOP, 0.2f));
         SetTextColor(mem, active ? COL_TEXT : COL_TEXT_DIM);
         RECT textRc = tabRc;
+        SelectObject(mem, GetFittedPickerFont(mem, label, textRc, SF(11), FW_BOLD, 4));
         DrawTextW(mem, label, -1, &textRc,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     };
 
-    drawPageTab(pageTabs.fonts, L"字体", PICKER_PAGE_FONTS,
+    drawPageTab(pageTabs.fonts, L"Fonts", PICKER_PAGE_FONTS,
         g_fontsPageTabHovered);
-    drawPageTab(pageTabs.guide, L"指南", PICKER_PAGE_GUIDE,
+    drawPageTab(pageTabs.guide, L"Guide", PICKER_PAGE_GUIDE,
         g_guidePageTabHovered);
 
     HFONT countFont = GetCachedPickerFont(L"Segoe UI", SF(10), 0, FW_NORMAL, DEFAULT_CHARSET);
@@ -61,9 +62,9 @@ static void PaintTitleBar(HDC mem, const RECT& rc)
     SetTextColor(mem, COL_TEXT_DIM);
     wchar_t contextBuf[64] = {};
     if (g_pickerPage == PICKER_PAGE_FONTS)
-        wsprintfW(contextBuf, L"%d 个字体", (int)g_filteredIndices.size());
+        wsprintfW(contextBuf, L"%d fonts", (int)g_filteredIndices.size());
     else
-        wcscpy_s(contextBuf, L"快速上手");
+        wcscpy_s(contextBuf, L"Getting started");
     RECT contextRc = { pageTabs.guide.right + 8, 0, zoomOutLeft - 4, TITLE_HEIGHT };
     if (contextRc.right - contextRc.left >= 42) {
         DrawTextW(mem, contextBuf, -1, &contextRc,

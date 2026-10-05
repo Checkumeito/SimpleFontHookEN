@@ -1,117 +1,138 @@
-# 架构说明
+# Architecture
 
-## 总体结构
+## Overall Structure
 
-SimpleFontHook 生成名为 `winmm.dll` 的代理 DLL。Windows 加载代理后，`DllMain`
-调用 `FontHooks::Install`，安装通用字体钩子和匹配的引擎适配器。系统 `winmm`
-导出由 `winmm_proxy.h` 转发，字体功能与代理导出保持分离。
+SimpleFontHook builds a proxy DLL named `winmm.dll`. After Windows loads the proxy,
+`DllMain` calls `FontHooks::Install` to install general font hooks and matching
+engine adapters. `winmm_proxy.h` forwards the system `winmm` exports. Font features
+remain separate from proxy exports.
 
 ```mermaid
 flowchart TD
-    A["目标程序加载 winmm.dll"] --> B["DllMain / FontHooks::Install"]
-    B --> C["读取 FontHook.ini"]
-    B --> D["安装通用 Detours 钩子"]
-    B --> E["检测并安装引擎适配器"]
-    B --> F["启动字体选择器和工作线程"]
-    D --> G["字体创建、选择、绘制与查询"]
-    E --> H["引擎缓存、资源或运行时接口"]
-    F --> I["保存配置并发布 ConfigVersion"]
+    A["Target application loads winmm.dll"] --> B["DllMain / FontHooks::Install"]
+    B --> C["Read FontHook.ini"]
+    B --> D["Install general Detours hooks"]
+    B --> E["Detect and install engine adapters"]
+    B --> F["Start font picker and worker threads"]
+    D --> G["Font creation, selection, drawing, and queries"]
+    E --> H["Engine caches, resources, or runtime interfaces"]
+    F --> I["Save configuration and publish ConfigVersion"]
     I --> G
     I --> H
 ```
 
-## 进程生命周期
+## Process Lifecycle
 
-1. `DLL_PROCESS_ATTACH` 禁止线程级 DLL 通知并调用 `FontHooks::Install`。
-2. 安装流程读取配置、准备静态适配状态、开启 Detours 事务并按类别安装钩子。
-3. Detours 提交后启动 Unity、Ren'Py、DirectWrite 延迟加载和字体选择器线程。
-4. UI 修改配置后递增 `Config::ConfigVersion`，清理通用缓存并通知各引擎适配器。
-5. 正常关闭流程停止工作线程并释放句柄。
-6. `DLL_PROCESS_DETACH` 位于加载器锁内，只调用 `Utils::RequestShutdown()` 发布信号。
+1. `DLL_PROCESS_ATTACH` disables thread-level DLL notifications and calls `FontHooks::Install`.
+2. Installation reads configuration, prepares static adapter state, begins a Detours transaction, and installs hooks by category.
+3. After the Detours transaction commits, it starts the Unity, Ren'Py, DirectWrite deferred-loading, and font picker threads.
+4. UI configuration changes increment `Config::ConfigVersion`, clear general caches, and notify each engine adapter.
+5. Normal shutdown stops worker threads and releases handles.
+6. `DLL_PROCESS_DETACH` runs under the loader lock and only calls `Utils::RequestShutdown()` to publish a signal.
 
-## 翻译单元策略
+## Translation Unit Strategy
 
-`hooks/font_hooks.cpp` 是钩子实现的聚合翻译单元。`hooks/internal/**/*.cppinc` 不单独
-编译，而是按明确顺序包含。这使原始 API 指针、Detours 目标和引擎状态保持内部链接，
-避免通过头文件暴露大量可变全局状态。
+`hooks/font_hooks.cpp` is the aggregate translation unit for hook implementations.
+`hooks/internal/**/*.cppinc` files are not compiled separately; they are included
+in an explicit order. This keeps original API pointers, Detours targets, and engine
+state at internal linkage, avoiding the exposure of large amounts of mutable
+global state through headers.
 
-UI 使用相同策略：`ui/font_picker.cpp` 聚合 `ui/internal/` 下的状态、绘制、输入、
-配置应用和生命周期分片。
+The UI uses the same strategy: `ui/font_picker.cpp` aggregates state, drawing,
+input, configuration application, and lifecycle fragments under `ui/internal/`.
 
-## 模块接口
+## Module Interfaces
 
-| 模块 | 对外接口 | 隐藏的实现 |
+| Module | Public Interface | Hidden Implementation |
 | --- | --- | --- |
-| 进程入口 | `FontHooks::Install` | 安装顺序、Detours 事务、工作线程启动 |
-| 配置 | `Utils::LoadConfig`、`SaveConfig` | UTF-8 INI 解析、默认值和兼容键读取 |
-| 字体替换模型 | GDI/DirectWrite 钩子处理程序 | 替换缓存、逻辑字体视图、度量与字形虚拟化 |
-| 字体表修改 | `FontPatcher::*` | SFNT/TTC 解析、表重建和校验和 |
-| 文件适配 | `engine_file_dispatch.cppinc` | 引擎优先级、虚拟属性和重定向 |
-| 引擎适配器 | `Install`、`Prepare`、`NotifyConfigChanged` 类入口 | 检测、缓存定位、运行时桥接和资源生成 |
-| 字体选择器 | `FontPicker::Init`、`Shutdown` | 窗口状态、绘制、输入和字体枚举 |
+| Process entry point | `FontHooks::Install` | Installation order, Detours transaction, and worker thread startup |
+| Configuration | `Utils::LoadConfig`, `SaveConfig` | UTF-8 INI parsing, defaults, and compatibility key loading |
+| Font replacement model | GDI/DirectWrite hook handlers | Replacement caches, logical font views, metrics, and glyph virtualization |
+| Font table modification | `FontPatcher::*` | SFNT/TTC parsing, table rebuilding, and checksums |
+| File adaptation | `engine_file_dispatch.cppinc` | Engine priorities, virtual attributes, and redirection |
+| Engine adapters | Entry points such as `Install`, `Prepare`, and `NotifyConfigChanged` | Detection, cache location, runtime bridges, and resource generation |
+| Font picker | `FontPicker::Init`, `Shutdown` | Window state, drawing, input, and font enumeration |
 
-## 字体替换与编码
+## Font Replacement and Encoding
 
-字体替换、字符集伪装、代码页重定向和文字映射是四条独立路径：
+Font replacement, charset spoofing, code page redirection, and character mapping
+are four independent paths:
 
-- 字体替换修改字体名称、HFONT、字体数据或引擎字体资源。
-- 字符集伪装修改字体请求和字体能力查询中暴露的字符集。
-- 代码页重定向修改明确启用的 `MultiByteToWideChar`/`WideCharToMultiByte` 转换。
-- 文字映射只在启用后将已解码 Unicode 字符映射为目标字符。
+- Font replacement modifies font names, HFONTs, font data, or engine font resources.
+- Charset spoofing modifies charsets exposed by font requests and font capability queries.
+- Code page redirection modifies explicitly enabled `MultiByteToWideChar`/`WideCharToMultiByte` conversions.
+- Character mapping maps decoded Unicode characters to target characters only when enabled.
 
-ANSI 文字映射优先采用原始字体创建阶段检测到的字符集。替换字体的字符集不能作为
-源文本编码依据，配置的 `TextSubstitutionCodepage` 只在无法检测时回退使用。
-YU-RIS 位图字体适配属于字体资源替换：适配器按已验证的 YPF 归档契约选择资源配置，
-独立探测目录编码，再按 188/192/160 槽字节布局枚举兼容页表。它不读取解包目录，也不读取
-`ForcedCharset`、`TextSubstitutionCodepage` 或代码页重定向配置；专用的
-`YurisAtlasCodepage` 只覆盖页表字符映射，不改变资源布局。Big5 固定页表先独立解码为
-Unicode；仅当通用文字映射已明确启用时，渲染字符才进入现有宽字符映射，字体替换本身
-不隐式开启繁简转换。
+ANSI character mapping first uses the charset detected during original font
+creation. The replacement font's charset cannot determine source text encoding.
+The configured `TextSubstitutionCodepage` is only a fallback when detection is
+unavailable.
 
-## 缓存与热切换
+YU-RIS bitmap font adaptation replaces font resources. The adapter selects the
+resource profile from the verified YPF archive contract, independently detects
+directory encoding, then enumerates compatible page tables using the
+188/192/160 slot byte layouts. It does not read an unpacked directory or
+`ForcedCharset`, `TextSubstitutionCodepage`, or code page redirection settings.
+The dedicated `YurisAtlasCodepage` overrides only page-table character mapping;
+it does not change the resource layout. The fixed Big5 page table is decoded to
+Unicode independently. Only when general character mapping is explicitly enabled
+do rendered characters pass through the existing wide-character mapping.
+Font replacement does not implicitly enable Traditional/Simplified Chinese conversion.
 
-`Config::ConfigVersion` 是运行时配置快照的版本号。缓存项记录创建时版本，读取路径只
-接受当前版本的字体、度量和引擎资源。通用缓存可直接清理，引擎缓存通过钩子、消息或
-运行时线程刷新。
+## Caches and Live Switching
 
-不要使用字体名称作为唯一缓存失效条件。度量、字符集、文字映射和字体数据也可能在
-字体名称不变时发生变化。
+`Config::ConfigVersion` is the version number of the runtime configuration snapshot.
+Cache entries record the version at creation. Read paths accept only fonts, metrics,
+and engine resources for the current version. General caches can be cleared
+directly; engine caches refresh through hooks, messages, or runtime threads.
 
-## 高频路径
+Do not use the font name as the sole condition for cache invalidation. Metrics,
+charsets, character mapping, and font data can change even when the font name does not.
 
-字体创建、`SelectObject`、文本绘制、字形轮廓和文件查询都可能每帧调用。高频路径只
-允许读取已缓存状态、进行有界查找和调用目标 API。模块扫描、PE 解析、ASAR 解析、
-字体源解析、必要的资源生成和运行时类型解析必须缓存或移到准备/工作线程阶段。
+## High-Frequency Paths
 
-## 引擎适配器
+Font creation, `SelectObject`, text drawing, glyph outlines, and file queries may
+be called every frame. High-frequency paths may only read cached state, perform
+bounded lookups, and call target APIs. Module scans, PE parsing, ASAR parsing,
+font source parsing, required resource generation, and runtime type resolution
+must be cached or moved to preparation or worker thread stages.
 
-引擎适配器用于 GDI/DirectWrite 无法覆盖的渲染路径，或用于刷新引擎内部字体缓存。
-适配器必须先通过稳定标记正向识别目标环境，再进行高开销操作。检测到通用字体 API
-只能证明程序使用字体，不能证明其属于某个具体引擎。
+## Engine Adapters
 
-识别流程把身份、能力和资源路由分开。共享扩展名与文件名只参与候选资源分类；模块
-标记、运行时接口、框架结构或已解析归档中的引擎资源负责身份确认。适配器确认身份后
-才处理对应文件请求，避免不同引擎使用相同后缀时互相进入专用逻辑。
+Engine adapters cover rendering paths that GDI/DirectWrite cannot handle or
+refresh internal engine font caches. An adapter must positively identify the
+target environment through stable markers before performing expensive operations.
+Detecting general font APIs proves only that an application uses fonts, not that
+it belongs to a specific engine.
 
-### 三阶段决策记录
+Identification separates identity, capabilities, and resource routing. Shared
+extensions and filenames participate only in candidate resource classification.
+Module markers, runtime interfaces, framework structures, or engine resources in
+parsed archives confirm identity. An adapter handles corresponding file requests
+only after confirming identity, preventing engines that share an extension from
+entering one another's specialized logic.
 
-| 阶段 | 输入 | 允许的证据 | 输出 |
+### Three-Stage Decision Records
+
+| Stage | Inputs | Allowed Evidence | Outputs |
 | --- | --- | --- | --- |
-| 身份 | 主模块、已加载模块、目录和已解析容器 | 组合字符串、导入/导出、运行时框架结构、容器内专有资源 | 已确认身份或透传 |
-| 能力 | 身份、版本、格式和目标 API | 可解析表结构、导出签名、运行时类型、资源布局 | 可安装能力集合或回退原因 |
-| 路由 | 已确认身份和一次资源请求 | 规范化路径、容器条目、资源类型与配置快照 | 原资源、虚拟资源或生成资源 |
+| Identity | Main module, loaded modules, directories, and parsed containers | Combined strings, imports/exports, runtime framework structures, and engine-specific resources in containers | Confirmed identity or pass-through |
+| Capabilities | Identity, version, format, and target API | Parseable table structures, export signatures, runtime types, and resource layouts | Installable capability set or fallback reason |
+| Routing | Confirmed identity and one resource request | Normalized paths, container entries, resource types, and configuration snapshot | Original, virtual, or generated resource |
 
-每次决策记录 `module`、`phase`、`decision`、`evidence`、`config_version` 和 `fallback`。
-高频请求只读取身份与能力缓存；静态扫描、归档解析和运行时类型搜索在准备阶段完成。
+Each decision records `module`, `phase`, `decision`, `evidence`, `config_version`,
+and `fallback`. High-frequency requests read only the identity and capability
+caches. Static scans, archive parsing, and runtime type searches occur during preparation.
 
-### 从证据到实现
+### From Evidence to Implementation
 
-1. 固定样本哈希、架构、构建配置和 `FontHook.ini` 快照。
-2. 记录适配器关闭时的 API、文件请求和渲染基线。
-3. 分别收集身份、能力和路由证据，标明观测、推断和待确认项。
-4. 将证据压缩为输入、前置条件、输出和失败行为组成的最小契约。
-5. 在对应检测、文件分发、字体资源或运行时桥接边界实现契约。
-6. 对正向、非目标、能力缺失和边界样本执行 Win32/x64 验证矩阵。
+1. Fix the sample hash, architecture, build configuration, and `FontHook.ini` snapshot.
+2. Record an API, file request, and rendering baseline with the adapter disabled.
+3. Collect identity, capability, and routing evidence separately, labeling observations, inferences, and unconfirmed items.
+4. Reduce the evidence to a minimum contract of inputs, preconditions, outputs, and failure behavior.
+5. Implement the contract at the relevant detection, file dispatch, font resource, or runtime bridge boundary.
+6. Execute the Win32/x64 verification matrix for positive, non-target, missing-capability, and boundary samples.
 
-详细规则见 [hooks/internal/engines/README.md](../SimpleFontHook/hooks/internal/engines/README.md)。
-证据等级、命令和记录模板见 [reproduction.md](reproduction.md)。
+See [hooks/internal/engines/README.md](../SimpleFontHook/hooks/internal/engines/README.md)
+for detailed rules. See [reproduction.md](reproduction.md) for evidence levels,
+commands, and record templates.

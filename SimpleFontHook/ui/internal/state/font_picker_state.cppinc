@@ -11,7 +11,7 @@ static const int HOTKEY_TOGGLE_PICKER_INSERT = 1;
 static const int HOTKEY_TOGGLE_PICKER_PAUSE = 2;
 static const int HOTKEY_TOGGLE_PICKER_SCROLL_LOCK = 3;
 static bool g_toggleHotkeyRegistered = false;
-static wchar_t g_toggleHotkeyDisplayName[32] = L"未注册";
+static wchar_t g_toggleHotkeyDisplayName[32] = L"Unregistered";
 
 enum PickerPage {
     PICKER_PAGE_FONTS = 0,
@@ -64,11 +64,11 @@ struct CharsetEntry {
     BYTE value;
 };
 static const CharsetEntry g_charsets[] = {
-    { L"默认",       DEFAULT_CHARSET },
-    { L"中文",       GB2312_CHARSET },
-    { L"日文",       SHIFTJIS_CHARSET },
-    { L"繁体",       CHINESEBIG5_CHARSET },
-    { L"韩文",       HANGUL_CHARSET },
+    { L"Default",       DEFAULT_CHARSET },
+    { L"Chinese",       GB2312_CHARSET },
+    { L"Japanese",       SHIFTJIS_CHARSET },
+    { L"Traditional",       CHINESEBIG5_CHARSET },
+    { L"Korean",       HANGUL_CHARSET },
 };
 static const int g_charsetCount = _countof(g_charsets);
 static int g_selectedCharset = 0;  // index into g_charsets, 0 = All
@@ -82,11 +82,11 @@ struct SpoofCharsetEntry {
     BYTE value;
 };
 static const SpoofCharsetEntry g_spoofCharsets[] = {
-    { L"\x65E5\x6587", L"\x65E5\x6587", SHIFTJIS_CHARSET },
-    { L"\x4E2D\x6587", L"\x4E2D\x6587", GB2312_CHARSET },
-    { L"\x7E41\x4F53", L"\x7E41\x4F53", CHINESEBIG5_CHARSET },
-    { L"\x9ED8\x8BA4", L"\x9ED8\x8BA4", DEFAULT_CHARSET },
-    { L"\x97E9\x6587", L"\x97E9\x6587", HANGUL_CHARSET },
+    { L"Japanese", L"Japanese", SHIFTJIS_CHARSET },
+    { L"Chinese", L"Chinese", GB2312_CHARSET },
+    { L"Traditional", L"Traditional", CHINESEBIG5_CHARSET },
+    { L"Default", L"Default", DEFAULT_CHARSET },
+    { L"Korean", L"Korean", HANGUL_CHARSET },
 };
 static const int g_spoofCharsetCount = _countof(g_spoofCharsets);
 static bool g_spoofEnabled = false;
@@ -104,9 +104,9 @@ struct TextSubstitutionModeEntry {
     int mode;
 };
 static const TextSubstitutionModeEntry g_textSubstitutionModes[] = {
-    { L"\x65E5\x7E41", Config::TextSubstitutionModeJapaneseTraditional },
-    { L"\x7E41>\x7B80", Config::TextSubstitutionModeTraditionalToSimplified },
-    { L"\x7B80>\x7E41", Config::TextSubstitutionModeSimplifiedToTraditional },
+    { L"JP→SC", Config::TextSubstitutionModeJapaneseTraditional },
+    { L"TC→SC", Config::TextSubstitutionModeTraditionalToSimplified },
+    { L"SC→TC", Config::TextSubstitutionModeSimplifiedToTraditional },
 };
 static const int g_textSubstitutionModeCount = _countof(g_textSubstitutionModes);
 static int g_textSubstitutionModeIdx = 0;
@@ -117,8 +117,8 @@ struct TextSubstitutionCodepageEntry {
     UINT codepage;
 };
 static const TextSubstitutionCodepageEntry g_textSubstitutionCodepages[] = {
-    { L"\x65E5\x6587", 932 },
-    { L"\x4E2D\x6587", 936 },
+    { L"Japanese", 932 },
+    { L"Chinese", 936 },
 };
 static const int g_textSubstitutionCodepageCount = _countof(g_textSubstitutionCodepages);
 static int g_textSubstitutionCodepageIdx = 0;
@@ -129,11 +129,11 @@ struct CodepageRedirectPresetEntry {
     UINT toCodepage;
 };
 static const CodepageRedirectPresetEntry g_codepageRedirectPresets[] = {
-    { L"\x65E5\x6587\x2192UTF-8", 932, CP_UTF8 },
-    { L"\x4E2D\x6587\x2192UTF-8", 936, CP_UTF8 },
-    { L"\x7CFB\x7EDF\x2192UTF-8", CP_ACP, CP_UTF8 },
-    { L"UTF-8\x2192\x65E5\x6587", CP_UTF8, 932 },
-    { L"UTF-8\x2192\x4E2D\x6587", CP_UTF8, 936 },
+    { L"932→UTF8", 932, CP_UTF8 },
+    { L"936→UTF8", 936, CP_UTF8 },
+    { L"ACP→UTF8", CP_ACP, CP_UTF8 },
+    { L"UTF8→932", CP_UTF8, 932 },
+    { L"UTF8→936", CP_UTF8, 936 },
 };
 static const int g_codepageRedirectPresetCount = _countof(g_codepageRedirectPresets);
 static bool g_codepageRedirectEnabled = false;
@@ -143,12 +143,12 @@ static bool g_codepageRedirectPresetHovered = false;
 
 static const wchar_t* GetCharsetDisplayName(BYTE charset) {
     switch (charset) {
-    case SHIFTJIS_CHARSET: return L"\x65E5\x6587";
-    case GB2312_CHARSET: return L"\x4E2D\x6587";
-    case CHINESEBIG5_CHARSET: return L"\x7E41\x4F53";
-    case HANGUL_CHARSET: return L"\x97E9\x6587";
-    case DEFAULT_CHARSET: return L"\x9ED8\x8BA4";
-    default: return L"\x672A\x77E5";
+    case SHIFTJIS_CHARSET: return L"Japanese";
+    case GB2312_CHARSET: return L"Chinese";
+    case CHINESEBIG5_CHARSET: return L"Traditional";
+    case HANGUL_CHARSET: return L"Korean";
+    case DEFAULT_CHARSET: return L"Default";
+    default: return L"Unknown";
     }
 }
 
@@ -266,6 +266,7 @@ static bool g_zoomInHovered = false;
 static bool g_zoomOutHovered = false;
 static int g_metricHovered = METRIC_NONE;
 static HWND g_hMetricEdit = NULL;
+static HFONT g_metricEditFont = NULL;
 static WNDPROC g_OldMetricEditProc = NULL;
 static MetricValueKind g_metricEditKind = METRIC_VALUE_NONE;
 static bool g_metricEditClosing = false;
@@ -349,6 +350,37 @@ static HFONT GetCachedPickerFont(const std::wstring& faceName, int height, int w
     entry.lastUsed = useTick;
     g_pickerFontCache.push_back(entry);
     return font;
+}
+
+// Fit only picker captions; the selected game font and Config values stay intact.
+static HFONT GetFittedPickerFont(HDC hdc, const wchar_t* text, const RECT& bounds,
+    int requestedHeight, int weight = FW_NORMAL, int padding = 0) {
+    int availableWidth = max(1, (int)(bounds.right - bounds.left) - padding * 2);
+    int availableHeight = max(1, (int)(bounds.bottom - bounds.top) - padding * 2);
+    int height = max(1, min(requestedHeight, availableHeight));
+    HGDIOBJ original = GetCurrentObject(hdc, OBJ_FONT);
+    HFONT font = NULL;
+    for (; height >= 1; --height) {
+        font = GetCachedPickerFont(L"Segoe UI", height, 0, weight, DEFAULT_CHARSET);
+        SelectObject(hdc, font);
+        SIZE extent = {};
+        GetTextExtentPoint32W(hdc, text, (int)wcslen(text), &extent);
+        if (extent.cx <= availableWidth && extent.cy <= availableHeight) break;
+    }
+    SelectObject(hdc, original);
+    return font;
+}
+
+static const wchar_t* SpoofToggleLabel() {
+    return g_spoofEnabled ? L"Spoof: On" : L"Spoof: Off";
+}
+
+static const wchar_t* MappingToggleLabel() {
+    return g_textSubstitutionEnabled ? L"Map: On" : L"Map: Off";
+}
+
+static const wchar_t* RedirectToggleLabel() {
+    return g_codepageRedirectEnabled ? L"CP: On" : L"CP: Off";
 }
 
 static void ReleasePaintBuffer() {

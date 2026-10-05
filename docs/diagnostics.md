@@ -1,49 +1,64 @@
-# 诊断与问题定位
+# Diagnostics and Troubleshooting
 
-## KRKR：启动时缺少 mapPrerenderedFont 成员
+## KRKR: Missing mapPrerenderedFont Member at Startup
 
-截图中的 `first.ks:14` / `mappfont` / `Member 'mapPrerenderedFont' does not exist`
-与所提供脚本第 14 行直接执行 `[mappfont storage=MPLUS1C12.tft]` 相符。代码检查发现
-旧适配器在安装时将主映像中的 `mapPrerenderedFont` 改成内部名称，直接调用该成员的
-脚本因而不能假定会进入异常回退；子串扫描还会命中 `unmapPrerenderedFont`。
-隐藏 TFT 也可能把问题变为字体资源加载异常。
+The screenshot's `first.ks:14` / `mappfont` /
+`Member 'mapPrerenderedFont' does not exist` agrees with the supplied script directly
+executing `[mappfont storage=MPLUS1C12.tft]` on line 14. Code inspection found that the old
+adapter renamed `mapPrerenderedFont` in the main image to an internal name during
+installation. A script calling that member directly therefore cannot be assumed to enter
+an exception fallback; the substring scan also matches `unmapPrerenderedFont`.
+Hiding TFT files may instead turn the issue into a font-resource loading exception.
 
-当前适配器保留成员名与文件可见性，在插件 `V2Link` 传入官方 exporter 时绑定
-Font 原生方法，对有效 map 调用转交同实例 unmap。所需接口缺失时透传，不使用
-错误弹窗作为切换字体渲染路径的机制。边界与开关语义见
-[KRKR 模块文档](../SimpleFontHook/hooks/internal/engines/krkr/README.md)。
+The current adapter preserves the member name and file visibility. When a plugin's
+`V2Link` supplies the official exporter, it binds the native Font methods and redirects
+valid map calls to unmap on the same instance. If required interfaces are missing, it
+passes calls through; error dialogs are not used to switch font-rendering paths. See the
+[KRKR module documentation](../SimpleFontHook/hooks/internal/engines/krkr/README.md)
+for boundaries and switch semantics.
 
-首次修改仅通过离线接口夹具；该夹具原先只模拟 `stdcall` 虚接口，未覆盖目标
-游戏实际使用的 `cdecl`。后续实际运行证据与修复如下。
+The initial change passed only an offline interface fixture. That fixture originally
+simulated only `stdcall` virtual interfaces and did not cover the target game's actual
+`cdecl` use. The subsequent runtime evidence and correction are described below.
 
-## KRKR：TVP 虚接口调用约定导致启动快失败
+## KRKR: TVP Virtual-Interface Calling Convention Causes Startup Fail-Fast
 
-实际运行 `hfeti_risa_crack.exe` 时，旧 DLL 以 `0xC0000409` 退出，Windows
-Application Error 记录 `WINMM.dll+0x5f305`。调试器捕获的第二次机会异常参数 2
-对应安全 cookie 检查失败，PDB 栈定位到 `KrkrBindFontMethods`，不是脚本弹窗。
+When `hfeti_risa_crack.exe` was run, the old DLL exited with `0xC0000409`, and Windows
+Application Error recorded `WINMM.dll+0x5f305`. Parameter 2 of the second-chance exception
+captured by the debugger indicated a security-cookie check failure. The PDB stack located
+it in `KrkrBindFontMethods`, rather than a script dialog.
 
-目标 EXE 的 `QueryFunctionsByNarrowString`（RVA `0x44700`）使用四个显式栈参数、
-以普通 `ret` 返回；引用计数调用点也由调用者清栈。TVP 导出的 Variant 构造辅助函数
-却以 `ret 4` 返回。因此不能将虚接口和导出辅助函数统一声明为同一种约定。
-当前 x86 桥接在首次查询时保存并恢复 ESP，根据实际清栈量选择 `cdecl` / `stdcall`
-虚接口入口；所有 TVP 导出辅助函数仍保持 `stdcall`。安全 cookie 检查保持开启。
+The target EXE's `QueryFunctionsByNarrowString` (RVA `0x44700`) uses four explicit stack
+arguments and returns with a plain `ret`; the caller also cleans the stack at reference-counting
+call sites. However, TVP's exported Variant construction helpers return with `ret 4`.
+The virtual interfaces and exported helpers therefore cannot share one calling-convention
+declaration. The current x86 bridge saves and restores ESP during the first query and
+selects a `cdecl` / `stdcall` virtual-interface entry point according to the observed
+stack cleanup. All TVP exported helpers retain `stdcall`. Security-cookie checking remains
+enabled.
 
-运行验证已备份游戏原 `winmm.dll`，再部署独立输出目录内编译的 Win32 修复版。
-新进程日志记录 `native-font-dispatch install=1 status=0 interface=cdecl`，进程保持
-响应，窗口实际显示房间背景和日文对话，未再停在启动崩溃。未改写游戏 EXE 或脚本，
-未由代理更改字体配置。此结论限定为此次启动和已观察到的对话画面，不代表全流程验证。
-原始 DLL、调用约定反汇编、调试转储及执行记录位于 `artifacts/krkr-compat/runtime/`；
-同一事务的四个交付角色及离线回归记录仍位于 `artifacts/krkr-compat/`。
+Runtime validation backed up the game's original `winmm.dll` before deploying the Win32
+fix built in a separate output directory. The new process logged
+`native-font-dispatch install=1 status=0 interface=cdecl`, remained responsive, and its
+window displayed a room background and Japanese dialogue instead of stopping at the
+startup crash. The game EXE and scripts were not rewritten, and the proxy did not alter
+the font configuration. This conclusion is limited to that startup and the observed
+dialogue screen; it does not establish full workflow validation. The original DLL,
+calling-convention disassembly, debug dumps, and execution records are in
+`artifacts/krkr-compat/runtime/`. The four delivery roles from the same transaction and
+the offline regression records remain in `artifacts/krkr-compat/`.
 
-## 日志文件
+## Log File
 
-运行日志写入目标程序目录中的 `FontHook.trace.log`。每个进程会话第一次写入时重建
-该文件，日志行包含时间、PID、TID 和模块标签。
+Runtime logs are written to `FontHook.trace.log` in the target program directory. Each
+process session recreates the file on its first write. Log lines include time, PID, TID,
+and a module tag.
 
-基础安装、配置和引擎探测日志始终可能出现。详细 API 采样、异常记录和卡顿监视由
-`EnableDebugLog` 控制。
+Basic installation, configuration, and engine-detection logs may appear regardless of
+the debug switch. Detailed API sampling, exception records, and hang monitoring are
+controlled by `EnableDebugLog`.
 
-## 用于复现的临时调试配置
+## Temporary Debug Configuration for Reproduction
 
 ```ini
 [FontHook]
@@ -53,7 +68,7 @@ DebugTraceSampleLimit=128
 DebugPickerThreadLogLimit=32
 ```
 
-只在复现问题期间启用。完成定位后恢复：
+Enable this only while reproducing the issue. After diagnosis, restore:
 
 ```ini
 EnableDebugLog=0
@@ -61,142 +76,165 @@ DebugTraceSampleLimit=0
 DebugPickerThreadLogLimit=0
 ```
 
-## 结构化字段
+## Structured Fields
 
-每条真实日志的固定前缀为本地时间、PID 和 TID；消息体包含模块标签。部分适配器消息在
-标签后使用 `key=value` 片段，其他消息使用固定文本。下表是整理证据时使用的归一化字段，
-不表示每条 `FontHook.trace.log` 都包含全部字段：
+Every actual log entry has a fixed prefix containing local time, PID, and TID; its message
+body includes a module tag. Some adapter messages use `key=value` fragments after the
+tag, while others use fixed text. The table below lists normalized fields for organizing
+evidence; it does not mean every `FontHook.trace.log` entry contains all these fields:
 
-| 字段 | 来源 | 判定用途 |
+| Field | Source | Interpretation |
 | --- | --- | --- |
-| `module` | 消息体中的适配器或通用钩子标签 | 确认处理边界 |
-| `phase` | 根据固定消息映射为 `identity`、`capability`、`route`、`render` 等阶段 | 区分决策层次 |
-| `decision` | 根据消息结果归一化为 `pass`、`skip`、`fallback`、`error` | 确认分支结果 |
-| `evidence` | 标记、导出、资源布局或运行时接口摘要 | 回溯身份/能力依据 |
-| `configVersion` | `Config::ConfigVersion` | 关联配置快照和缓存 |
-| `request` / `route` | 原始请求与规范化/虚拟路径 | 检查分发结果 |
-| `fallback` | 回退原因或 `none` | 区分能力缺失与资源缺失 |
-| `duration_us` | 调用计时器，或由 `scan-ms` 等原字段换算 | 定位高频路径耗时 |
+| `module` | Adapter or generic-hook tag in the message body | Identify the processing boundary |
+| `phase` | Fixed messages mapped to phases such as `identity`, `capability`, `route`, or `render` | Distinguish decision stages |
+| `decision` | Message results normalized to `pass`, `skip`, `fallback`, or `error` | Identify the branch outcome |
+| `evidence` | Summary of markers, exports, resource layout, or runtime interfaces | Trace the identity/capability basis |
+| `configVersion` | `Config::ConfigVersion` | Associate a configuration snapshot with caches |
+| `request` / `route` | Original request and normalized/virtual path | Check dispatch results |
+| `fallback` | Fallback reason or `none` | Distinguish missing capability from missing resources |
+| `duration_us` | Call timer, or converted from an original field such as `scan-ms` | Locate time spent in high-frequency paths |
 
-同一复现记录中，日志、配置和样本哈希必须使用同一进程架构。缺少字段时标记为“待确认”，
-不以最终画面单独推断分支。
+Logs, configuration, and sample hashes in the same reproduction record must use the
+same process architecture. Mark missing fields as "unconfirmed"; do not infer a branch
+solely from the final screen.
 
-## 日志标签
+## Log Tags
 
-| 标签 | 含义 |
+| Tag | Meaning |
 | --- | --- |
-| `[TRACE]` | 安装、配置版本和 API 采样 |
-| `[DEBUG][TextSub]` | 文字映射输入和输出 |
-| `[DEBUG][BGI]` | BGI 身份、DSC/LINE 字体脚本、GDI 缓存和度量适配 |
-| `[DEBUG][CatSystem2]` | classic CatSystem2 字体源、文件重定向和缺失目录枚举回退 |
-| `[DEBUG][UnityMono]` | Unity Mono 运行时绑定和对象应用 |
-| `[DEBUG][CatSystemUnity]` | Unity IL2CPP/TMP 运行时适配 |
-| `[RenPy]` | 字体源解析、Python 虚拟文件回调和缓存刷新 |
-| `[Tyrano]` | ASAR 检测、Web 字体重定向和桥接 |
-| `[Yuris]` | YPF 目录编码探测、兼容页表、图集替换和覆盖值回退 |
-| `[DIAG][crash]` | 首次机会异常的有限采样 |
-| `[DIAG][hang-watchdog]` | 长时间阶段和窗口无响应探测 |
+| `[TRACE]` | Installation, configuration versions, and API sampling |
+| `[DEBUG][TextSub]` | Text-mapping input and output |
+| `[DEBUG][BGI]` | BGI identity, DSC/LINE font scripts, GDI caches, and metric adaptation |
+| `[DEBUG][CatSystem2]` | classic CatSystem2 font sources, file redirection, and fallback for missing directory enumeration |
+| `[DEBUG][UnityMono]` | Unity Mono runtime binding and object application |
+| `[DEBUG][CatSystemUnity]` | Unity IL2CPP/TMP runtime adaptation |
+| `[RenPy]` | Font-source resolution, Python virtual-file callbacks, and cache refresh |
+| `[Tyrano]` | ASAR detection, Web font redirection, and bridging |
+| `[Yuris]` | YPF directory-encoding detection, compatible page tables, atlas replacement, and override fallback |
+| `[DIAG][crash]` | Limited sampling of first-chance exceptions |
+| `[DIAG][hang-watchdog]` | Long-running stages and unresponsive-window detection |
 
-## 定位流程
+## Diagnostic Workflow
 
-1. 使用关闭所有可选兼容功能的配置确认基础加载是否正常。
-2. 只启用字体名称替换，区分字体问题与编码、度量或引擎缓存问题。
-3. 分别启用字符集伪装、代码页重定向和文字映射，不同时改变多个变量。
-4. 查看进程启动阶段的引擎探测结果，确认没有误判。
-5. 对照首次错误输出前后的 API 样本，而不是只分析最终截图。
-6. 记录目标程序架构、DLL SHA-256、配置文件和最短复现步骤。
+1. Check basic loading with all optional compatibility features disabled.
+2. Enable only face-name replacement to distinguish font issues from encoding, metric, or engine-cache issues.
+3. Enable character-set spoofing, code-page redirection, and text mapping separately; do not change several variables at once.
+4. Inspect engine-detection results during process startup to check for false positives.
+5. Compare API samples before and after the first incorrect output instead of analyzing only the final screenshot.
+6. Record the target program architecture, DLL SHA-256, configuration file, and shortest reproduction steps.
 
-### 证据复刻步骤
+### Evidence Reproduction Steps
 
-1. 复制样本到隔离目录，使用 `Get-FileHash -Algorithm SHA256` 保存所有输入哈希。
-2. 使用关闭目标适配器的配置启动一次，保存基线日志和截图。
-3. 每次只改变一个配置组，记录 `ConfigVersion`、适配器日志和结果哈希。
-4. 使用正向、相似但非目标、能力缺失和边界样本验证身份、能力、路由三个阶段。
-5. 将命令、配置、日志和产物路径写入 [功能证据与复刻流程](reproduction.md) 的记录模板。
+1. Copy the sample into an isolated directory and use `Get-FileHash -Algorithm SHA256` to save all input hashes.
+2. Start once with the target adapter disabled and save baseline logs and screenshots.
+3. Change one configuration group at a time and record `ConfigVersion`, adapter logs, and result hashes.
+4. Validate the identity, capability, and routing stages with positive, similar but non-target, missing-capability, and boundary samples.
+5. Add commands, configuration, logs, and artifact paths to the record template in [Feature Evidence and Reproduction](reproduction.md).
 
-## 常见问题
+## Common Issues
 
-### 换字体后文字变成错误汉字
+### Text Becomes Incorrect Chinese Characters After Changing Fonts
 
-先确认是否错误启用了代码页重定向或文字映射。字体替换本身不应改变文本字节流。
-查看原始字体请求检测到的字符集，以及 `[DEBUG][TextSub]` 中实际解码后的 Unicode。
+First check whether code-page redirection or text mapping was enabled incorrectly. Font
+replacement itself should not change the text byte stream. Inspect the character set
+detected from the original font request and the actual decoded Unicode in
+`[DEBUG][TextSub]`.
 
-### 字体切换后没有变化
+### Font Switching Has No Visible Effect
 
-检查 `ConfigVersion` 是否更新、目标引擎是否使用内部缓存，以及对应适配器是否记录了
-缓存清理或资源重建。不要直接把问题归因于字体名称替换失败。
+Check whether `ConfigVersion` changed, whether the target engine uses internal caches,
+and whether its adapter logged cache clearing or resource regeneration. Do not immediately
+attribute the issue to failed face-name replacement.
 
-### 繁简映射开启后回想文本断行异常
+### Abnormal Line Breaks in Backlog Text After Traditional/Simplified Mapping
 
-仅使用 ANSI GDI 绘制的程序可能用 `GetTextExtentExPointA` 返回值推进原始 DBCS
-字节缓冲区。文字映射路径可以把测量暂时转到宽字符 API，但必须把 `lpnFit` 和
-`lpnDx` 转回源字节边界；否则返回的 UTF-16 字符数会让调用方从半个汉字或过早位置
-继续排版。检查 `[DEBUG][TextSub]` 的解码结果时，同时确认度量钩子保留了 ANSI 字节
-计数，不能只看屏幕上的简体字是否正确。
+Programs that draw only through ANSI GDI may use `GetTextExtentExPointA` results to
+advance through the original DBCS byte buffer. The text-mapping path can temporarily
+measure through wide-character APIs, but must convert `lpnFit` and `lpnDx` back to source
+byte boundaries. Otherwise, a returned UTF-16 character count may make the caller resume
+layout halfway through a Chinese character or too early. While checking decoded output
+in `[DEBUG][TextSub]`, also confirm that the metric hook preserves ANSI byte counts;
+correct Simplified Chinese on screen alone is insufficient.
 
-### TyranoScript 换字体后场景或插件提示 file not found
+### TyranoScript Reports file not found for a Scene or Plugin After Font Switching
 
-先确认 `resources/app.asar` 与 `resources/app` 的实际布局。已经从 `app.asar` 启动的
-Electron 进程必须在字体热切换后继续看到同一归档；否则后续 `./data/scenario/...` 和
-`./data/scenario/../others/plugin/...` 请求会落到不存在或不完整的 loose 根。开启
-`EnableDebugLog` 后检查 `[DEBUG][Tyrano]` 的 `asar-visible`、`asar-index-ready` 和
-`asar-overlay-open`，并确认规范化后的条目仍位于应用根内。
+First confirm the actual layout of `resources/app.asar` and `resources/app`. An Electron
+process already started from `app.asar` must continue to see the same archive after font
+hot switching. Otherwise, later `./data/scenario/...` and
+`./data/scenario/../others/plugin/...` requests fall into a missing or incomplete loose
+root. Enable `EnableDebugLog` and check `[DEBUG][Tyrano]` messages for `asar-visible`,
+`asar-index-ready`, and `asar-overlay-open`; also confirm that normalized entries remain
+within the application root.
 
-### 启动卡顿
+### Startup Stalls
 
-检查日志中的慢调用和 watchdog 阶段。重点排查高频钩子中的重复文件扫描、PE/ASAR
-解析、字体源或资源生成、运行时类型查找和无界日志。
+Inspect slow calls and watchdog stages in the logs. Focus on repeated file scans,
+PE/ASAR parsing, font-source or resource generation, runtime type lookup, and unbounded
+logging in high-frequency hooks.
 
-### 仅某个引擎异常
+### Only One Engine Has Problems
 
-先确认引擎检测证据，再临时关闭该引擎总开关进行对照。通用 GDI 导入不能作为具体
-引擎身份的充分证据。
+First confirm the engine-detection evidence, then temporarily disable that engine's
+master switch for comparison. Generic GDI imports are not sufficient evidence of a
+specific engine's identity.
 
-### BGI LINE 界面仍使用固定字体
+### BGI LINE UI Still Uses a Fixed Font
 
-先查启动日志中的 `phase=line-font-capability`。`decision=attached` 表示当前 x86/x64
-DSC 解码器 profile 唯一并已挂接；`decision=skip` 时根据 `evidence` 判断是缺少 DSC、
-解码器布局未知还是匹配不唯一，适配器会保留原脚本。
+First inspect `phase=line-font-capability` in the startup log. `decision=attached` means
+the current x86/x64 DSC decoder profile is unique and attached. For `decision=skip`, use
+`evidence` to distinguish missing DSC, an unknown decoder layout, and nonunique matches;
+the adapter preserves the original script.
 
-进入 LINE 界面后还必须出现 `phase=line-font-apply decision=patched`。其中 `evidence`
-应为已验证的 `bp-modern-font-record-0c00` 或 `bp-legacy-font-record-0bd4`，`size` 和
-`offset` 用于对应本次内存输出。只有 capability 而没有 apply，表示解码器钩子可用但当前
-BP 没有唯一命中已知 LINE 语义布局，不要改用固定 RVA 或只搜索字体名。
+After entering the LINE UI, `phase=line-font-apply decision=patched` must also appear.
+Its `evidence` should be the verified `bp-modern-font-record-0c00` or
+`bp-legacy-font-record-0bd4`; `size` and `offset` identify the current in-memory output.
+Capability without apply means the decoder hook is available, but the current BP has no
+unique match for a known LINE semantic layout. Do not substitute a fixed RVA or search
+only for font names.
 
-该路径直接处理 `sysprg.arc` 解码后的内存缓冲区。目标目录没有解包后的 `scrdrv._bp` 是
-正常状态；放置同名松散文件不会启用功能，也不能用于判断路由是否成功。
+This path processes the in-memory buffer decoded from `sysprg.arc` directly. A target
+directory without an extracted `scrdrv._bp` is normal. Placing a loose file with that
+name does not enable the feature and cannot establish successful routing.
 
-### YU-RIS 页表布局不兼容
+### Incompatible YU-RIS Page-Table Layout
 
-先看 `atlas encoding resolved` 的 `layout`、`auto-codepage` 和兼容代码页数量，再确认
-`YurisAtlasCodepage`。出现 `atlas-codepage override incompatible` 表示指定代码页不能
-装入当前固定页数和槽位；例如 CP932 的 45×188 图集不能承载 GBK 的 127×192 页表。
-这时需要提供与目标代码页匹配的字体资源布局，而不是改 `ForcedCharset`、转码或文字映射选项。
-也不要用 EXE 中单个 `push 932` 或 `MultiByteToWideChar` 导入判断页表；现有 CP932、GBK
-和 Big5 样本都保留同一套 CRT 转换代码，该证据不能区分实际字体槽位。
+First inspect `layout`, `auto-codepage`, and the number of compatible code pages in
+`atlas encoding resolved`, then check `YurisAtlasCodepage`. A message of
+`atlas-codepage override incompatible` means the specified code page cannot fit the
+current fixed page count and slots. For example, a CP932 45×188 atlas cannot contain a
+GBK 127×192 page table. Provide a font-resource layout matching the target code page
+rather than changing `ForcedCharset`, transcoding, or text-mapping options.
+Do not determine the page table from a single `push 932` or a `MultiByteToWideChar`
+import in the EXE. The existing CP932, GBK, and Big5 samples retain the same CRT
+conversion code, so that evidence cannot distinguish actual font slots.
 
-### YU-RIS 标点偏移或出现碎点
+### Offset Punctuation or Stray Pixels in YU-RIS
 
-先区分资源的“槽步长”“实际字框”和“文字绘制原点”。WebP `gbk-s38` 使用
-816x624 画布、16x12 槽、48 px 步长和 38x38 字框。运行时 GDI 的首槽绘制原点由槽起点
-`(5,11)` 和绘制偏移 `(5,4)` 合成 `(10,15)`，用于保留参考 Pillow 图集约 6 px 的槽顶透明区；不能把黑框强制居中，也不能套用 Relirium 的贴左、
-贴底坐标。Relirium 与 Big5 也不能共用同一组偏移：Relirium/YDG 才使用统一的左下偏移
-和底部省略号；Big5 的 `、。`、全宽问叹号、成对括号、小型形式符号与居中省略号分别
-按 PNG 图集的 bearing 类别定位。所有配置均按单槽裁剪，并在字体缺字时使用同类符号或
-代码页回退字体，
-避免相邻槽串图和 `.notdef` 碎片。
+Distinguish the resource's "slot stride", "actual glyph box", and "text drawing origin".
+WebP `gbk-s38` uses an 816x624 canvas, 16x12 slots, a 48 px stride, and 38x38 glyph boxes.
+The first runtime GDI slot's drawing origin combines the slot start `(5,11)` and drawing
+offset `(5,4)` into `(10,15)` to preserve approximately 6 px of transparency at the slot
+top in the reference Pillow atlas. Do not force the black box to the center or reuse
+Relirium's left/bottom alignment coordinates. Relirium and Big5 cannot share the same
+offsets either: only Relirium/YDG uses the common bottom-left offset and bottom-aligned
+ellipsis. Big5's `、。`, fullwidth question and exclamation marks, paired brackets,
+small-form symbols, and centered ellipsis are positioned by their PNG atlas bearing
+categories. Every configuration clips per slot and uses a related symbol or code-page
+fallback font for missing glyphs to avoid spillover into neighboring slots and `.notdef`
+fragments.
 
-## 日志提交内容
+## What to Include with Logs
 
-提供问题材料时包含：目标程序架构、复现步骤、`FontHook.ini`、对应构建哈希、完整的
-单次 `FontHook.trace.log` 和错误画面。删除与问题无关的重复日志，避免混合不同配置
-版本的记录。
+Issue reports should include the target program architecture, reproduction steps,
+`FontHook.ini`, the corresponding build hash, one complete session's
+`FontHook.trace.log`, and the error screen. Remove unrelated duplicate logs and avoid
+mixing records from different configuration versions.
 
-## 证据判定
+## Evidence Interpretation
 
-| 结果 | 允许的结论 |
+| Result | Permitted conclusion |
 | --- | --- |
-| 身份日志 `decision=pass`，能力日志 `decision=pass` | 可以检查专用资源路由 |
-| 身份通过，能力 `fallback` | 适配器保持通用路径，记录回退原因 |
-| 身份 `skip` | 不检查引擎专用资源，不修改导入、缓存或文本 |
-| 只有最终截图变化 | 结果可见，但分支来源待确认 |
+| Identity log `decision=pass`, capability log `decision=pass` | Engine-specific resource routing can be inspected |
+| Identity passes, capability is `fallback` | The adapter retains the generic path and records the fallback reason |
+| Identity is `skip` | Do not inspect engine-specific resources or modify imports, caches, or text |
+| Only a visible change in the final screenshot | The result is visible, but its branch source is unconfirmed |

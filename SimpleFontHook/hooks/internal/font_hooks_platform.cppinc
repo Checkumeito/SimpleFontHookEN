@@ -139,7 +139,7 @@ static bool StopDirectWriteDelayedHookThread(bool waitForExit) {
         "directwrite-delayed-hook");
 }
 
-// 核心：拦截字体创建，强制修改字体名称
+// Replace the font face at the DirectWrite text-format creation boundary.
 HRESULT STDMETHODCALLTYPE newCreateTextFormat(
     IDWriteFactory* This,
     const WCHAR* fontFamilyName,
@@ -204,7 +204,7 @@ HRESULT STDMETHODCALLTYPE newCreateTextLayout(IDWriteFactory* This, const WCHAR*
     if (SUCCEEDED(hr) && textLayout && *textLayout) {
         static std::mutex dwriteMutex;
         std::lock_guard<std::mutex> lock(dwriteMutex);
-        // 如果需要进一步拦截文本渲染，在这里 hook IDWriteTextLayout 的 vtable
+        // Hook the text-layout vtable here to intercept subsequent text rendering.
         if (orgIDWriteTextLayout_Draw == NULL) {
             void** vtable = *(void***)(*textLayout);
             orgIDWriteTextLayout_Draw = (pIDWriteTextLayout_Draw)vtable[18]; // Draw Index is usually 18
@@ -213,7 +213,7 @@ HRESULT STDMETHODCALLTYPE newCreateTextLayout(IDWriteFactory* This, const WCHAR*
     return hr;
 }
 
-// DWrite 工厂创建时的拦截入口
+// Intercept DirectWrite factory creation.
 static HRESULT WINAPI newDWriteCreateFactory(DWRITE_FACTORY_TYPE factoryType, REFIID iid, IUnknown** factory) {
     HRESULT hr = orgDWriteCreateFactory(factoryType, iid, factory);
     Utils::Trace("[DEBUG][DWrite] DWriteCreateFactory hit type=%d hr=0x%08lX factory=%p",
@@ -230,7 +230,7 @@ static HRESULT WINAPI newDWriteCreateFactory(DWRITE_FACTORY_TYPE factoryType, RE
             DetourAttach(&(PVOID&)orgCreateTextLayout, newCreateTextLayout);
         }
 
-        // Hook CreateTextFormat (Index 15) - 替换字体的关键点
+        // CreateTextFormat occupies vtable slot 15, the font replacement boundary.
         if (orgCreateTextFormat == NULL) {
             orgCreateTextFormat = (pCreateTextFormat)vtable[15];
             DetourAttach(&(PVOID&)orgCreateTextFormat, newCreateTextFormat);

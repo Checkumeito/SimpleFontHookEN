@@ -39,48 +39,62 @@ static void PaintPreviewPanel(HDC mem, const RECT& rc)
         const std::wstring& fontName = g_allFonts[g_filteredIndices[g_selectedIndex]].name;
 
         // Full preview text
-        int previewHeight = SF(28);
+        // The panel is a bounded visual sample, even when an existing INI carries
+        // unusually large metrics. Leave the actual game configuration untouched.
+        float requestedHeight = (float)SF(28);
         if (Config::EnableFontHeightScale)
-            previewHeight = max(SF(12), (int)(previewHeight * Config::FontHeightScale + 0.5f));
+            requestedHeight *= Config::FontHeightScale;
+        int previewHeight = (int)max((float)SF(12), min(96.0f, requestedHeight));
         int previewWidth = 0;
         if (Config::EnableFontWidthScale)
-            previewWidth = max(1, (int)((previewHeight / 2.0f) * Config::FontWidthScale + 0.5f));
+            previewWidth = (int)max(1.0f, min(96.0f, (previewHeight / 2.0f) * Config::FontWidthScale));
         int previewWeight = Config::EnableFontWeight ? Config::FontWeight : FW_NORMAL;
-        HFONT prevFont = GetCachedPickerFont(fontName, previewHeight, previewWidth, previewWeight, gameCs);
-        HGDIOBJ oldPreviewFont = SelectObject(mem, prevFont);
-        int oldCharExtra = 0x80000000;
-        if (Config::EnableFontCharSpacing && Config::FontCharSpacing != 0)
-            oldCharExtra = SetTextCharacterExtra(mem, Config::FontCharSpacing);
-        SetTextColor(mem, COL_TEXT);
-        RECT contentRc = { 24, prevTop + 24, rc.right - 24, rc.bottom - 32 };
-        TEXTMETRICW previewTm = {};
-        GetTextMetricsW(mem, &previewTm);
-        int previewLineStep = max(1, (int)(previewTm.tmHeight + previewTm.tmExternalLeading));
-        if (Config::EnableFontLineSpacing && Config::FontLineSpacing != 0)
-            previewLineStep = max(1, (int)previewTm.tmHeight + Config::FontLineSpacing);
         const wchar_t* previewLines[] = {
-            L"\x300c\x6d4b\x8bd5\x6587\x5b57 Sample Text\x300d",
-            L"\x3042\x3044\x3046\x3048\x304a 0123456789"
+            L"Sample Text",
+            L"0123456789 !?"
         };
+        RECT contentRc = { 24, prevTop + 20, rc.right - 24, rc.bottom - 55 };
+        int savedPreview = SaveDC(mem);
+        int previewLineStep = 1;
+        // Scale the visual sample as a whole to fit the compact panel. This does
+        // not write any font metrics or spacing back to the game configuration.
+        for (int height = previewHeight; height >= 1; --height) {
+            float fit = (float)height / max(1, previewHeight);
+            int width = previewWidth ? max(1, (int)(previewWidth * fit)) : 0;
+            SelectObject(mem, GetCachedPickerFont(fontName, height, width, previewWeight, gameCs));
+            int spacing = Config::EnableFontCharSpacing ? ClampInt(Config::FontCharSpacing, -20, 60) : 0;
+            SetTextCharacterExtra(mem, (int)(spacing * fit));
+            TEXTMETRICW metrics = {};
+            GetTextMetricsW(mem, &metrics);
+            previewLineStep = max(1, (int)(metrics.tmHeight + metrics.tmExternalLeading));
+            if (Config::EnableFontLineSpacing)
+                previewLineStep = max((int)metrics.tmHeight, (int)metrics.tmHeight +
+                    (int)(ClampInt(Config::FontLineSpacing, -80, 200) * fit));
+            SIZE first = {}, second = {};
+            GetTextExtentPoint32W(mem, previewLines[0], lstrlenW(previewLines[0]), &first);
+            GetTextExtentPoint32W(mem, previewLines[1], lstrlenW(previewLines[1]), &second);
+            if (max(first.cx, second.cx) <= contentRc.right - contentRc.left &&
+                previewLineStep + metrics.tmHeight <= contentRc.bottom - contentRc.top) break;
+        }
+        SetTextColor(mem, COL_TEXT);
+        IntersectClipRect(mem, contentRc.left, contentRc.top, contentRc.right, contentRc.bottom);
         int lineY = contentRc.top;
         for (int i = 0; i < 2 && lineY < contentRc.bottom; ++i) {
             TextOutW(mem, contentRc.left, lineY, previewLines[i], lstrlenW(previewLines[i]));
             lineY += previewLineStep;
         }
-        if (oldCharExtra != 0x80000000 && oldCharExtra != 0x7FFFFFFF)
-            SetTextCharacterExtra(mem, oldCharExtra);
-        SelectObject(mem, oldPreviewFont);
+        RestoreDC(mem, savedPreview);
 
         // Bottom info line
         HFONT infoFont = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_NORMAL, DEFAULT_CHARSET);
         HGDIOBJ oldInfoFont = SelectObject(mem, infoFont);
 
-        SetTextColor(mem, COL_TEXT_HINT);
-        RECT infoRc = { 18, rc.bottom - 22, rc.right / 2 + 60, rc.bottom - 4 };
+        SetTextColor(mem, COL_TEXT_DIM);
+        RECT infoRc = { 18, rc.bottom - 49, rc.right - 18, rc.bottom - 32 };
         wchar_t infoBuf[256];
         
         // Map detected charset to name
-        const wchar_t* detName = L"未知"; // 未知
+        const wchar_t* detName = L"Unknown"; // Unknown
         for(int i=0; i<g_charsetCount; i++) {
             if(g_charsets[i].value == Config::DetectedCharset) {
                 detName = g_charsets[i].label;
@@ -88,15 +102,19 @@ static void PaintPreviewPanel(HDC mem, const RECT& rc)
             }
         }
 
-        wsprintfW(infoBuf, L"游戏: %s (%d)  |  选择: %s (%d)  |  %d/%d", 
+        wsprintfW(infoBuf, L"Game: %s (%d)  |  Selected: %s (%d)  |  %d/%d",
             detName, (int)Config::DetectedCharset,
             g_charsets[g_selectedCharset].label, (int)g_charsets[g_selectedCharset].value,
-            g_selectedIndex + 1, itemCount); // 游戏: ... | 选择: ...
-        DrawTextW(mem, infoBuf, -1, &infoRc, DT_LEFT | DT_SINGLELINE);
+            g_selectedIndex + 1, itemCount); // Game: ... | Selected: ...
+        SelectObject(mem, GetFittedPickerFont(mem, infoBuf, infoRc, SF(11)));
+        DrawTextW(mem, infoBuf, -1, &infoRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-        SetTextColor(mem, RGB(80, 62, 110));
-        RECT hintRc = { rc.right / 2 + 60, rc.bottom - 22, rc.right - 14, rc.bottom - 4 };
-        DrawTextW(mem, L"Enter=应用  Esc=隐藏", -1, &hintRc, DT_RIGHT | DT_SINGLELINE);
+        RECT hintRc = { 18, rc.bottom - 32, rc.right - 18, rc.bottom - 15 };
+        wchar_t hintBuf[96] = {};
+        swprintf_s(hintBuf, L"Enter=Apply  Esc=Hide  Hotkey=%s", g_toggleHotkeyDisplayName);
+        SelectObject(mem, GetFittedPickerFont(mem, hintBuf, hintRc, SF(11)));
+        SetTextColor(mem, COL_TEXT_DIM);
+        DrawTextW(mem, hintBuf, -1, &hintRc, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
         SelectObject(mem, oldInfoFont);
     }
 

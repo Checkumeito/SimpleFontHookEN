@@ -1,84 +1,105 @@
-# Artemis 适配器
+# Artemis Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 Artemis 的字体表配置、字体文件虚拟化、PFS 资源读取和运行时字体缓存刷新。
-适配器把字体选择器中的字体名称、度量与间距配置转换为 Artemis 可以直接读取的表文件
-和字体资源，并在 `ConfigVersion` 变化时更新对应运行时对象。
+This directory handles Artemis font table configuration, font file virtualization, PFS
+resource reads, and runtime font cache refreshes. The adapter converts the font names,
+metrics, and spacing configured in the font picker into table files and font resources that
+Artemis can read directly, and updates the corresponding runtime objects when
+`ConfigVersion` changes.
 
-## 通用路径覆盖范围
+## Coverage of the General Paths
 
-Artemis 的窗口字体首先由 `list_windows*.tbl` 指定，字体文件可能来自 PFS，加载后又被
-FreeType 对象、字体图集和内部哈希表长期缓存。GDI 字体创建只覆盖其中的辅助路径，
-无法让已经解析的表字段、归档资源和运行时缓存同步到同一次字体配置。
+Artemis window fonts are initially specified by `list_windows*.tbl`. Font files may come
+from PFS and, after loading, remain cached in FreeType objects, font atlases, and internal
+hash tables. GDI font creation only covers auxiliary paths; it cannot synchronize already
+parsed table fields, archive resources, and runtime caches to the same font configuration.
 
-本适配器把配置转换为 Artemis 自身的输入：表文件引用当前版本字体资源，文件分派器
-交付对应 SFNT 字节，配置通知刷新已验证的运行时缓存。三部分共同保证引擎从资源发现
-到字形栅格化都使用同一 `ConfigVersion`。
+This adapter converts configuration into Artemis's own inputs: table files reference the
+current version's font resources, the file dispatcher delivers the corresponding SFNT bytes,
+and configuration notifications refresh verified runtime caches. Together, these three parts
+ensure that the engine uses the same `ConfigVersion` from resource discovery through glyph
+rasterization.
 
-## 身份与资源
+## Identity and Resources
 
-Artemis 表布局由 PFS 头与索引解析结果确认。解析器识别 `pf2`、`pf6`、`pf8`，校验索引
-长度、条目数量、长度前缀路径和 20 字节资源元数据；索引内包含
-`system/table/list_windows*.tbl` 资源族时建立表布局身份。
+The Artemis table layout is confirmed by the results of parsing PFS headers and indexes.
+The parser recognizes `pf2`, `pf6`, and `pf8`, validating index lengths, entry counts,
+length-prefixed paths, and 20-byte resource metadata. The presence of the
+`system/table/list_windows*.tbl` resource family in the index establishes table-layout
+identity.
 
-PFS 文件名和 `.pfs` 后缀只用于定位候选归档。表布局与 IET 布局分别分类各自资源，
-同一发行包包含两类资源时，文件分派器按实际请求调用相应处理器。
-身份成立后，实际请求对应的松散表文件可作为资源覆盖来源。
+PFS filenames and the `.pfs` suffix only locate candidate archives. Table and IET layouts
+classify their respective resources separately. When a release package contains both kinds
+of resources, the file dispatcher calls the appropriate handler for the actual request.
+After identity is confirmed, the loose table file corresponding to the actual request can
+serve as a resource override source.
 
-## 文件结构
+## File Structure
 
-- `artemis_paths.cppinc`：路径规范化、引擎检测、字体来源和资源分类。
-- `artemis_detection_contract.cppinc`：PFS 布局证据和跨分片资源读取接口。
-- `artemis_pfs.cppinc`：PFS 头、索引、哈希和资源内容解析。
-- `artemis_table_patch.cppinc`：`list_windows*.tbl` 字体、字距、行距和字号字段更新。
-- `artemis_file_hooks.cppinc`：为表文件和字体资源创建只读虚拟文件句柄与属性结果。
-- `artemis_cache.cppinc`：FreeType 字体对象、字体图集和内部哈希缓存的发现与刷新。
-- `../common/engine_font_export.cppinc`：共享 GDI 字体导出和 SFNT 数据校验。
+- `artemis_paths.cppinc`: path normalization, engine detection, font sources, and resource classification.
+- `artemis_detection_contract.cppinc`: PFS layout evidence and resource read interfaces across fragments.
+- `artemis_pfs.cppinc`: PFS header, index, hash, and resource content parsing.
+- `artemis_table_patch.cppinc`: updates to font, character spacing, line spacing, and font size fields in `list_windows*.tbl`.
+- `artemis_file_hooks.cppinc`: read-only virtual file handles and attribute results for tables and font resources.
+- `artemis_cache.cppinc`: discovery and refresh of FreeType font objects, font atlases, and internal hash caches.
+- `../common/engine_font_export.cppinc`: shared GDI font export and SFNT data validation.
 
-## 实现原理
+## Implementation Principles
 
-1. PFS 解析器验证头、索引和资源边界，并以 `list_windows*.tbl` 资源族确认表布局。
-2. 字体来源解析器定位显式文件、系统字体或游戏本地字体；TTC 按字体名称选择目标面。
-3. 字体字节应用名称、字符集能力、垂直度量和 `cmap` 配置，并绑定版本化虚拟路径。
-4. 表处理器修改字体引用、字号、注音字号、字距和行距，使引擎主动请求该虚拟资源。
-5. 统一文件分派器为表和字体返回只读句柄与一致的属性结果；其他访问交给真实 API。
-6. 配置通知准备当前版本资源，并刷新通过类型、地址和布局校验的缓存对象。
+1. The PFS parser validates headers, indexes, and resource boundaries, and confirms the table
+   layout through the `list_windows*.tbl` resource family.
+2. The font source resolver locates explicit files, system fonts, or game-local fonts;
+   TTC sources select the target face by font name.
+3. Font bytes receive the name, character set capabilities, vertical metrics, and `cmap`
+   configuration and are bound to a versioned virtual path.
+4. The table handler modifies font references, font size, ruby text size, character spacing,
+   and line spacing so the engine actively requests that virtual resource.
+5. The unified file dispatcher returns read-only handles and consistent attribute results for
+   tables and fonts; other access goes to the real APIs.
+6. Configuration notifications prepare the current version's resources and refresh cache
+   objects that pass type, address, and layout validation.
 
-## 功能
+## Features
 
-### 字体资源
+### Font Resources
 
-字体源解析覆盖当前用户字体、系统字体和游戏目录字体。适配器为每个配置版本生成稳定的
-虚拟字体路径，并通过系统字体文件重定向或内存 SFNT 数据提供字体内容。字体族名、字重、
-字符集能力和垂直度量使用通用字体配置。
+Font source resolution covers current-user fonts, system fonts, and game-directory fonts.
+The adapter generates a stable virtual font path for each configuration version and supplies
+font content through system font file redirection or in-memory SFNT data. Font family names,
+weight, character set capabilities, and vertical metrics use the general font configuration.
 
-### 表文件
+### Table Files
 
-`list_windows.tbl`、`list_windows_ja.tbl` 及同系列变体可以从松散文件或 PFS 归档读取。
-表内容支持以下字段：
+`list_windows.tbl`, `list_windows_ja.tbl`, and related variants can be read from loose files
+or PFS archives. Table content supports the following fields:
 
-- 字体文件和编号字体赋值。
-- `kerning` 字距。
-- 行距以及按 em 千分比换算的垂直度量。
-- `size` 正文字号。
-- `rubysize` 注音字号。
+- Font files and numbered font assignments.
+- `kerning` character spacing.
+- Line spacing and vertical metrics converted in thousandths of an em.
+- `size` body text font size.
+- `rubysize` ruby text font size.
 
-### 热切换
+### Live Switching
 
-字体文件、表内容和缓存状态都以 `Config::ConfigVersion` 标识。配置通知会准备当前版本
-字体资源，刷新已知 FreeType 对象，标记字体图集并清理可验证的内部缓存布局。
+Font files, table content, and cache state are all identified by `Config::ConfigVersion`.
+Configuration notifications prepare the current version's font resources, refresh known
+FreeType objects, mark font atlases, and clear internal cache layouts that can be verified.
 
-## 设计约束依据
+## Rationale for Design Constraints
 
-- PFS 只作为受校验的资源来源，适配器为请求生成内存视图，避免重写归档和索引。
-- 虚拟字体路径包含配置版本，使按路径缓存的引擎能够区分内容不同的字体快照。
-- 表请求只有在能够返回有效明文内容时才声明为松散文件，保证引擎仍可采用原生 PFS
-  回退流程。
-- 运行时刷新只接触可验证对象；布局证据不足时，文件与表适配仍可独立工作。
-- 表布局与 IET 布局分别确认和路由，因为两类资源契约及运行时缓存结构不同。
+- PFS is only a validated resource source. The adapter generates in-memory views for requests
+  to avoid rewriting archives and indexes.
+- Virtual font paths include the configuration version so engines that cache by path can
+  distinguish font snapshots with different content.
+- A table request is only represented as a loose file when valid plaintext content can be
+  returned, allowing the engine to retain its native PFS fallback.
+- Runtime refreshes only access verifiable objects. File and table adaptation can still work
+  independently when layout evidence is insufficient.
+- Table and IET layouts are confirmed and routed separately because their resource contracts
+  and runtime cache structures differ.
 
-## 配置
+## Configuration
 
 - `EnableArtemisHook`
 - `ArtemisPatchTables`
@@ -87,37 +108,45 @@ PFS 文件名和 `.pfs` 后缀只用于定位候选归档。表布局与 IET 布
 - `ArtemisFontPath`
 - `ArtemisFontSize`
 - `ArtemisRubySize`
-- 通用字体名称、字重、字距、行距、垂直度量和字符集配置
+- General font name, weight, character spacing, line spacing, vertical metrics, and character set configuration
 
-## 运行约束
+## Runtime Constraints
 
-- 文件虚拟化统一经过 `engine_file_dispatch.cppinc`。
-- PFS 数量、索引大小、资源偏移和资源长度均执行有界校验。
-- 运行时对象只在类型、地址范围、内存保护和布局特征完整匹配时参与刷新。
-- 字体对象扫描和字体源准备使用缓存或配置通知路径；PFS 布局与资源入口按进程缓存。
-- 文件写入请求由真实文件 API 处理；虚拟资源面向只读加载流程。
+- File virtualization goes through `engine_file_dispatch.cppinc`.
+- PFS counts, index sizes, resource offsets, and resource lengths all undergo bounded validation.
+- Runtime objects participate in refreshes only when their types, address ranges, memory
+  protections, and layout characteristics match completely.
+- Font object scans and font source preparation use caches or configuration notification
+  paths; PFS layouts and resource entry points are cached per process.
+- File write requests are handled by the real file APIs; virtual resources serve read-only
+  loading paths.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 固定 PFS 与主模块 SHA-256，记录候选容器路径；后缀只用于枚举。
-2. 使用 `artemis_pfs.cppinc` 的解析入口读取 `pf2`、`pf6` 或 `pf8` 头，保存索引长度、
-   条目数量、路径长度和 20 字节元数据的边界检查结果。
-3. 在解析后的索引中确认 `system/table/list_windows*.tbl` 资源族，记录实际容器路径和条目。
-4. 对同一表分别执行 PFS 读取与松散文件读取，记录字体字段、字号、注音字号、字距、行距
-   和生成的版本化字体路径。
-5. 打开虚拟字体并校验 SFNT/TTC 头；切换配置后对照 `ConfigVersion`、表内容与缓存刷新记录。
+1. Fix the PFS and main module SHA-256 values and record candidate container paths; suffixes
+   are only used for enumeration.
+2. Use the parsing entry points in `artemis_pfs.cppinc` to read `pf2`, `pf6`, or `pf8` headers.
+   Retain boundary check results for index length, entry count, path lengths, and 20-byte metadata.
+3. Confirm the `system/table/list_windows*.tbl` resource family in the parsed index and record
+   the actual container path and entries.
+4. Read the same table from PFS and a loose file separately. Record font fields, font size,
+   ruby text size, character spacing, line spacing, and the generated versioned font path.
+5. Open the virtual font and validate its SFNT/TTC header. After switching configuration,
+   compare `ConfigVersion`, table content, and cache refresh records.
 
-| 场景 | 身份/能力证据 | 预期结果 |
+| Scenario | Identity/capability evidence | Expected result |
 | --- | --- | --- |
-| 有效 PFS + 表资源族 | 头、索引、目标条目均通过 | 表与字体请求进入 Artemis 路由 |
-| 同后缀但缺少表资源族 | 只有 PFS 容器 | 身份不成立 |
-| 表可读、运行时布局未知 | 文件能力通过，缓存能力缺失 | 文件适配生效，运行时内存保持不变 |
-| 损坏索引或越界资源 | 边界校验失败 | 容器不提供资源，记录回退原因 |
+| Valid PFS + table resource family | Header, index, and target entries all pass | Table and font requests enter Artemis routing |
+| Same suffix without table resource family | PFS container only | Identity is not confirmed |
+| Readable table, unknown runtime layout | File capability passes; cache capability is missing | File adaptation takes effect; runtime memory stays unchanged |
+| Damaged index or out-of-bounds resource | Boundary validation fails | Container provides no resources; fallback reason is recorded |
 
-复刻产物包含 PFS 索引摘要、处理前后表内容、字体字节哈希、`[DEBUG][Artemis]` 单次日志和
-非目标样本结果。字段格式见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+Reproduction artifacts include a PFS index summary, table content before and after processing,
+font byte hashes, a single `[DEBUG][Artemis]` log capture, and non-target sample results. See
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md) for field formats.
 
-## 验证
+## Verification
 
-覆盖松散表文件、PFS 表资源、系统字体、游戏本地字体、表字段组合、字体图集刷新、功能
-开关、连续热切换、损坏 PFS 和非 Artemis 程序。
+Cover loose table files, PFS table resources, system fonts, game-local fonts, table field
+combinations, font atlas refreshes, feature switches, repeated live switching, damaged PFS,
+and non-Artemis programs.

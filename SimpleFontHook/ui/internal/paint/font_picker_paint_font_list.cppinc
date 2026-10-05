@@ -40,22 +40,24 @@ static void PaintFontList(HDC mem, const RECT& rc)
         // Badges (from right to left)
         if (isApplied) {
             SelectObject(mem, uiBadge);
-            SIZE sz; GetTextExtentPoint32W(mem, L"✓ 已应用", 5, &sz);  // 已应用
+            const wchar_t* badgeLabel = L"✓ Applied";
+            SIZE sz; GetTextExtentPoint32W(mem, badgeLabel, (int)wcslen(badgeLabel), &sz);
             int bw = sz.cx + 12;
             RECT bdgRc = { badgeRight - bw, itemRc.top + (ITEM_HEIGHT - 20) / 2, badgeRight, itemRc.top + (ITEM_HEIGHT + 16) / 2 };
             FillRoundRect(mem, bdgRc, 9, COL_APPLIED_BG);
             SetTextColor(mem, COL_APPLIED_TEXT);
-            DrawTextW(mem, L"✓ 已应用", -1, &bdgRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);  // 已应用
+            DrawTextW(mem, badgeLabel, -1, &bdgRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             badgeRight -= bw + 6;
         }
         if (isRecent && !isApplied) {
             SelectObject(mem, uiBadge);
-            SIZE sz; GetTextExtentPoint32W(mem, L"☆ 最近", 4, &sz);  // 最近
+            const wchar_t* badgeLabel = L"☆ Recent";
+            SIZE sz; GetTextExtentPoint32W(mem, badgeLabel, (int)wcslen(badgeLabel), &sz);
             int bw = sz.cx + 12;
             RECT bdgRc = { badgeRight - bw, itemRc.top + (ITEM_HEIGHT - 20) / 2, badgeRight, itemRc.top + (ITEM_HEIGHT + 16) / 2 };
             FillRoundRect(mem, bdgRc, 9, COL_BADGE_BG);
             SetTextColor(mem, COL_BADGE_TEXT);
-            DrawTextW(mem, L"☆ 最近", -1, &bdgRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);  // 最近
+            DrawTextW(mem, badgeLabel, -1, &bdgRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             badgeRight -= bw + 6;
         }
 

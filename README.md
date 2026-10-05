@@ -1,114 +1,124 @@
-# SimpleFontHook
+# SimpleFontHookEN
 
-SimpleFontHook 是面向 Windows 游戏的字体兼容与替换 DLL。产物以 `winmm.dll` 代理形式
-随目标进程加载，在保留系统 `winmm` 导出的同时接入 GDI、GDI+、DirectWrite 和部分
-引擎运行时。项目把字体对象、字体数据、文本编码和引擎资源视为不同层次，按实际调用
-路径选择最小适配面。
+SimpleFontHookEN is an English fork of
+[SuQiandYing/SimpleFontHook](https://github.com/SuQiandYing/SimpleFontHook).
+SimpleFontHook is a font compatibility and replacement DLL for Windows games. The DLL
+loads with the target process as a `winmm.dll` proxy, retaining the system `winmm`
+exports while hooking into GDI, GDI+, DirectWrite, and selected engine runtimes.
+The project treats font objects, font data, text encoding, and engine resources as
+separate layers, choosing the smallest adaptation surface for the actual call path.
 
-## 主要能力
+## Main Capabilities
 
-- 替换 ANSI、Unicode、GDI+ 和 DirectWrite 字体创建结果。
-- 调整字体高度、宽度、字距、行距、粗细和垂直度量。
-- 独立控制字符集伪装、代码页重定向和繁简文字映射。
-- 通过字体选择器实时切换字体并保存 `FontHook.ini`。
-- 在字体选择器内提供普通用户指南，说明字体选择、应用、显示修正和排版调整流程。
-- 为已确认的 YU-RIS CP932、GBK、Big5 与 Relirium YDG 位图字体资源实时生成系统字体图集。
-- 为 Unity Mono/IL2CPP、classic CatSystem2、BGI、Artemis 与 Artemis Legacy、KiriKiri、
-  Entis、Softpal、Escude、Mirai、Majiro、DxLib、TinkerBell、TyranoScript、Ren'Py 和
-  YU-RIS 提供兼容路径。
+- Replace fonts created through ANSI, Unicode, GDI+, and DirectWrite APIs.
+- Adjust font height, width, character spacing, line spacing, weight, and vertical metrics.
+- Control charset spoofing, code page redirection, Japanese proxy glyph mapping, and Traditional/Simplified Chinese character mapping independently.
+- Switch fonts live through the font picker and save `FontHook.ini`.
+- Provide a guide for regular users in the font picker, covering font selection, application, display correction, and layout adjustments.
+- Generate system font atlases at runtime for confirmed YU-RIS CP932, GBK, and Big5 bitmap font resources, and Relirium YDG bitmap font resources.
+- Provide compatibility paths for Unity Mono/IL2CPP, classic CatSystem2, BGI, Artemis and Artemis Legacy, KiriKiri,
+  Entis, Softpal, Escude, Mirai, Majiro, DxLib, TinkerBell, TyranoScript, Ren'Py, and YU-RIS.
 
-## 工作原理
+## How It Works
 
-一次字体应用由以下层次协作完成：
+Applying a font involves the following layers:
 
-1. Windows 从程序目录加载代理 `winmm.dll`，代理导出继续转发到系统 `winmm`。
-2. `FontHooks::Install` 读取 `FontHook.ini`，在同一 Detours 事务中安装通用 API 钩子和
-   已确认能力的引擎入口。
-3. 通用字体模型根据源 `LOGFONT`、目标字体和配置版本创建替换 `HFONT`，并为绘制、
-   度量、枚举和字体数据查询提供一致视图。
-4. 引擎适配器处理通用 API 看不到的资源，例如预渲染字体、磁盘缓存、归档内容、
-   Python 映射以及 Mono/IL2CPP 托管对象。
-5. 字体选择器保存配置并递增 `Config::ConfigVersion`；缓存和引擎资源只接受对应版本的
-   数据，从而让一次切换形成完整快照。
+1. Windows loads the proxy `winmm.dll` from the application directory. The proxy exports continue forwarding to the system `winmm`.
+2. `FontHooks::Install` reads `FontHook.ini` and installs general API hooks and engine entry points with confirmed capabilities in the same Detours transaction.
+3. The general font model creates a replacement `HFONT` from the source `LOGFONT`, target font, and configuration version, and provides a consistent view for drawing, measurement, enumeration, and font data queries.
+4. Engine adapters handle resources that general APIs cannot see, such as prerendered fonts, disk caches, archive contents, Python mappings, and Mono/IL2CPP managed objects.
+5. The font picker saves the configuration and increments `Config::ConfigVersion`. Caches and engine resources accept only data for the matching version, making each switch a complete snapshot.
 
-这套分层的目的，是让字体替换只改变字体相关状态。字符集伪装、代码页转换和文字映射
-各有独立开关与数据流，替换字体的字符集不会被当作源文本编码依据。
+This layering ensures that font replacement changes only font-related state.
+Charset spoofing, code page conversion, and character mapping each have independent
+switches and data flows. The replacement font's charset is not used to determine
+the source text encoding.
 
-## 功能证据与复刻
+## Feature Evidence and Reproduction
 
-模块文档使用四类信息描述功能：输入与前置条件、执行入口、输出与回退、验证方法。
-引擎适配器把身份确认、版本能力和资源路由分别记录，通用 GDI 导入、文件扩展名或单个
-文件名不构成引擎身份。结论可沿着源码文件、符号、命令或带字段的运行日志回到证据来源。
+Module documentation describes features through four categories: inputs and
+preconditions, execution entry points, outputs and fallbacks, and verification
+methods. Engine adapters record identity confirmation, version capabilities, and
+resource routing separately. General GDI imports, file extensions, or a single
+filename do not establish engine identity. Conclusions can be traced to evidence
+through source files, symbols, commands, or runtime logs with named fields.
 
-在另一份样本上复刻时，先记录样本 SHA-256、架构和 `FontHook.ini` 快照，再建立关闭目标
-适配器时的基线；随后收集 PE、文件结构和运行时证据，提取最小输入输出契约，并执行正向、
-非目标、能力缺失和边界场景。完整步骤与记录模板见
-[功能证据与复刻流程](docs/reproduction.md)。
+To reproduce behavior on another sample, first record its SHA-256, architecture,
+and `FontHook.ini` snapshot, then establish a baseline with the target adapter
+disabled. Collect PE, file structure, and runtime evidence, extract the minimum
+input/output contract, and exercise positive, non-target, missing-capability,
+and boundary scenarios. See the
+[Feature Evidence and Reproduction Workflow](docs/reproduction.md)
+for the complete procedure and record templates.
 
-## 快速使用
+## Quick Start
 
-1. 确认目标程序架构，32 位程序使用 Win32 产物，64 位程序使用 x64 产物。
-2. 备份目标程序目录中已有的 `winmm.dll` 和 `FontHook.ini`。
-3. 将对应架构的 `winmm.dll` 放到目标可执行文件同级目录。
-4. 启动程序，按游戏文本的实际编码选择中文、日文、繁体或韩文字符集，再选择并应用字体。
+1. Confirm the target application's architecture. Use the Win32 build for a 32-bit application and the x64 build for a 64-bit application.
+2. Back up any existing `winmm.dll` and `FontHook.ini` in the target application directory.
+3. Place the matching `winmm.dll` next to the target executable.
+4. Start the application, choose the Chinese, Japanese, Traditional Chinese, or Korean charset that matches the game text's actual encoding, then select and apply a font.
 
-字体选择器优先注册单键 `Insert`，冲突时依次尝试 `Pause` 和 `Scroll Lock`。界面页脚与
-指南显示实际注册成功的按键。配置文件保存在 DLL 同级目录，使用 UTF-8 编码。
+The font picker first tries to register the single-key `Insert` shortcut. If it
+conflicts, it tries `Pause`, then `Scroll Lock`. The footer and guide show the key
+that was successfully registered. The configuration file is saved next to the DLL
+using UTF-8 encoding.
 
-## 编译
+## Build
 
-前置条件：Visual Studio 2022、v143 C++ 工具集和 Windows 10 SDK。仓库根目录已经
-包含 Win32 与 x64 使用的 Detours 头文件和静态库。
+Prerequisites: Visual Studio 2022, the v143 C++ toolset, and the Windows 10 SDK.
+The repository root already includes the Detours headers and static libraries
+used by Win32 and x64.
 
 ```bat
 build_x32.bat
 build_x64.bat
 ```
 
-Release 产物：
+Release outputs:
 
-- Win32：`Release/winmm.dll`
-- x64：`x64/Release/winmm.dll`
+- Win32: `Release/winmm.dll`
+- x64: `x64/Release/winmm.dll`
 
-完整的编译和发布检查见 [docs/build-and-release.md](docs/build-and-release.md)。
+See [docs/build-and-release.md](docs/build-and-release.md) for the complete build
+and release checks.
 
-## 目录结构
+## Directory Structure
 
-| 路径 | 职责 |
+| Path | Responsibility |
 | --- | --- |
-| `SimpleFontHook/dllmain.cpp` | 进程加载入口和退出信号 |
-| `SimpleFontHook/hooks/` | Detours 钩子、字体替换模型和引擎适配器 |
-| `SimpleFontHook/font/` | TTF/OTF/TTC 解析与字体表修改 |
-| `SimpleFontHook/ui/` | 字体选择器、配置应用和绘制 |
-| `SimpleFontHook/utils.cpp` | 配置持久化、自定义字体加载和诊断设施 |
-| `Release/`、`x64/Release/` | Release 构建产物 |
+| `SimpleFontHook/dllmain.cpp` | Process load entry point and shutdown signal |
+| `SimpleFontHook/hooks/` | Detours hooks, font replacement model, and engine adapters |
+| `SimpleFontHook/font/` | TTF/OTF/TTC parsing and font table modification |
+| `SimpleFontHook/ui/` | Font picker, configuration application, and drawing |
+| `SimpleFontHook/utils.cpp` | Configuration persistence, custom font loading, and diagnostics |
+| `Release/`, `x64/Release/` | Release build outputs |
 
-## 模块边界
+## Module Boundaries
 
-- `dllmain.cpp` 只发布安装入口和退出信号，业务逻辑位于钩子、字体、UI 与配置模块。
-- `hooks/font_hooks.cpp` 聚合 `.cppinc` 实现，使原始 API 指针和引擎状态保持内部链接。
-- `font/` 只处理 SFNT/TTC 字节，不读取游戏文本，也不参与引擎身份判断。
-- `ui/` 只修改配置并发布版本通知，不直接操作引擎内部对象。
-- `engine_file_dispatch.cppinc` 是文件隐藏、虚拟属性与重定向的唯一跨引擎分派入口。
+- `dllmain.cpp` only exposes the installation entry point and shutdown signal. Business logic resides in the hook, font, UI, and configuration modules.
+- `hooks/font_hooks.cpp` aggregates `.cppinc` implementations, keeping original API pointers and engine state at internal linkage.
+- `font/` handles only SFNT/TTC bytes. It does not read game text or participate in engine identification.
+- `ui/` only modifies configuration and publishes version notifications. It does not directly manipulate internal engine objects.
+- `engine_file_dispatch.cppinc` is the sole cross-engine dispatch entry point for file hiding, virtual attributes, and redirection.
 
-## 文档导航
+## Documentation
 
-- [架构说明](docs/architecture.md)
-- [配置说明](docs/configuration.md)
-- [功能证据与复刻流程](docs/reproduction.md)
-- [编译与发布](docs/build-and-release.md)
-- [诊断与问题定位](docs/diagnostics.md)
-- [贡献与编码守则](CONTRIBUTING.md)
-- [自动化代理守则](AGENTS.md)
-- [钩子模块结构](SimpleFontHook/hooks/README.md)
-- [引擎适配器索引](SimpleFontHook/hooks/internal/engines/README.md)
-- [UI 模块结构](SimpleFontHook/ui/README.md)
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [Feature Evidence and Reproduction Workflow](docs/reproduction.md)
+- [Build and Release](docs/build-and-release.md)
+- [Diagnostics and Troubleshooting](docs/diagnostics.md)
+- [Contribution and Coding Rules](CONTRIBUTING.md)
+- [Automation Agent Rules](AGENTS.md)
+- [Hook Module Structure](SimpleFontHook/hooks/README.md)
+- [Engine Adapter Index](SimpleFontHook/hooks/internal/engines/README.md)
+- [UI Module Structure](SimpleFontHook/ui/README.md)
 
-## 核心不变量
+## Core Invariants
 
-- 字体替换只负责字体对象和字体数据，不得隐式改变文本编码。
-- 文本编码判断以程序原始字符集和显式配置为依据，不从替换字体反推。
-- 引擎适配器必须有可验证的正向检测条件，不能仅凭通用 GDI 导入判定具体引擎。
-- 钩子内部调用真实 Win32 API 时使用保存的 `org*` 指针，避免递归进入钩子。
-- 高频路径不得重复扫描可执行文件、资源归档或字体文件。
-- 代码修改必须同时保持 Win32 与 x64 Release 可编译。
+- Font replacement handles only font objects and font data. It must not implicitly change text encoding.
+- Text encoding is determined from the application's original charset and explicit configuration, never inferred from the replacement font.
+- Engine adapters must have verifiable positive detection conditions. General GDI imports alone cannot identify a specific engine.
+- Hooks use saved `org*` pointers when calling real Win32 APIs to avoid recursive hook entry.
+- High-frequency paths must not repeatedly scan executables, resource archives, or font files.
+- Code changes must preserve successful Win32 and x64 Release builds.

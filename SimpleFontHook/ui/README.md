@@ -1,99 +1,113 @@
-# 字体选择器模块
+# Font Picker Module
 
-## 模块定位
+## Module Role
 
-`ui/` 提供进程内字体选择器，负责枚举字体、编辑字体与度量配置、保存 `FontHook.ini`，
-并把一次用户操作发布为完整的运行时配置版本。UI 不直接修改引擎缓存或托管对象；这些
-动作由 `FontHooks::NotifyConfigChanged` 分派到对应模块。
+`ui/` provides an in-process font picker. It enumerates fonts, edits font and metric
+configuration, saves `FontHook.ini`, and publishes each user action as a complete
+runtime configuration version. The UI does not directly modify engine caches or
+managed objects; `FontHooks::NotifyConfigChanged` dispatches those actions to the
+corresponding modules.
 
-这条边界保证窗口线程只维护界面和配置状态。引擎要求 Python、Mono、IL2CPP 或游戏
-窗口线程时，各适配器可以采用自己的调度方式。
+This boundary keeps the window thread responsible only for UI and configuration
+state. Adapters can use their own scheduling when an engine requires Python, Mono,
+IL2CPP, or the game window thread.
 
-## 公共接口
+## Public Interfaces
 
-| 接口 | 职责 |
+| Interface | Responsibility |
 | --- | --- |
-| `FontPicker::Init` | 创建选择器窗口并运行消息循环 |
-| `FontPicker::Toggle` | 切换窗口可见性 |
-| `FontPicker::IsVisible` | 查询当前显示状态 |
-| `FontPicker::Shutdown` | 跨线程发布消息循环退出请求 |
+| `FontPicker::Init` | Create the picker window and run the message loop |
+| `FontPicker::Toggle` | Toggle window visibility |
+| `FontPicker::IsVisible` | Query current visibility |
+| `FontPicker::Shutdown` | Publish a message-loop exit request across threads |
 
-## 聚合结构
+## Aggregate Structure
 
-`font_picker.cpp` 是 UI 的聚合翻译单元，按固定顺序包含以下分片：
+`font_picker.cpp` is the UI aggregate translation unit and includes these fragments
+in a fixed order:
 
-| 分片 | 职责 |
+| Fragment | Responsibility |
 | --- | --- |
-| `internal/font_picker_state_layout.cppinc` | 聚合窗口状态、布局几何、度量编辑状态和显隐动画 |
-| `internal/font_picker_apply_config.cppinc` | 校验配置、保存文件、递增版本、通知游戏窗口与钩子 |
-| `internal/font_picker_font_list.cppinc` | 字体枚举、搜索、来源定位、本地字体和字体表克隆 |
-| `internal/font_picker_paint.cppinc` | 聚合标题、字体设置、普通用户指南、预览和滚动条绘制 |
-| `internal/font_picker_input.cppinc` | 聚合键盘、鼠标、选择、滚动和数值编辑 |
-| `internal/font_picker_lifecycle.cppinc` | 窗口创建、配置恢复、消息循环与退出 |
+| `internal/font_picker_state_layout.cppinc` | Aggregate window state, layout geometry, metric-editing state, and show/hide animation |
+| `internal/font_picker_apply_config.cppinc` | Validate configuration, save the file, increment the version, and notify game windows and hooks |
+| `internal/font_picker_font_list.cppinc` | Font enumeration, search, source resolution, local fonts, and font-table cloning |
+| `internal/font_picker_paint.cppinc` | Aggregate title, font settings, ordinary-user guide, preview, and scrollbar drawing |
+| `internal/font_picker_input.cppinc` | Aggregate keyboard, mouse, selection, scrolling, and numeric editing |
+| `internal/font_picker_lifecycle.cppinc` | Window creation, configuration restoration, message loop, and shutdown |
 
-分片作为 `font_picker.cpp` 的一部分编译，使窗口句柄、绘制缓存、选择状态和字体列表保留
-内部链接；文件划分仍能把状态、输入、绘制和配置应用分别维护。
+Fragments compile as part of `font_picker.cpp`, retaining internal linkage for window
+handles, drawing caches, selection state, and font lists. File boundaries still allow
+state, input, drawing, and configuration application to be maintained separately.
 
-## 应用流程
+## Application Flow
 
-1. `Init` 恢复配置，创建隐藏或可见的选择器窗口，并枚举系统与本地字体。
-2. 搜索和列表选择只更新 UI 状态；确认应用时定位真实字体来源并准备必要的字体表克隆。
-3. 配置应用函数执行范围校验，刷新通用钩子状态并保存 UTF-8 INI。
-4. `Config::ConfigVersion` 递增后，UI 调用配置通知并向游戏窗口发布有限的重绘消息。
-5. 引擎适配器在自己的线程模型中消费该版本；UI 继续使用同一份配置快照绘制预览。
+1. `Init` restores configuration, creates a hidden or visible picker window, and enumerates system and local fonts.
+2. Search and list selection update only UI state. Confirming application resolves the real font source and prepares any required font-table clones.
+3. Configuration application validates ranges, refreshes generic-hook state, and saves a UTF-8 INI.
+4. After incrementing `Config::ConfigVersion`, the UI issues configuration notification and publishes bounded redraw messages to game windows.
+5. Engine adapters consume that version within their own threading models; the UI draws previews from the same configuration snapshot.
 
-标题栏提供 `字体` 与 `指南` 两个页面。`字体` 页承担搜索、选择、配置和预览；`指南` 页
-隐藏原生搜索框，并提供 `快速开始`、`功能说明`、`快捷键` 和 `问题处理` 四个章节。
-快速开始按文件准备、文本编码、字体应用和画面检查组织步骤；功能说明解释每个可见控件的
-作用、启用条件与结果判断；快捷键覆盖窗口、字体列表和指南阅读；问题处理按画面现象区分
-字体覆盖、字符映射、代码页和排版问题。指南只面向普通用户，不包含引擎识别、资源格式或
-兼容适配细节。`Tab` 在两个页面之间切换，`Insert` 是首选窗口显隐键，页脚显示当前进程
-实际注册成功的按键。
+The title bar offers `Fonts` and `Guide` pages. `Fonts` provides search, selection,
+configuration, and preview. `Guide` hides the native search box and provides four
+sections: `Start`, `Features`, `Keys`, and `Help`. Start
+organizes file preparation, text encoding, font application, and screen checks.
+Features explains each visible control, when it applies, and how to interpret its
+result. Keys covers the window, font list, and guide reading. Help
+distinguishes font coverage, character mapping, code pages, and layout issues by
+their visible symptoms. The guide is for ordinary users and does not include engine
+detection, resource formats, or adapter compatibility details. `Tab` switches
+between the pages; `Insert` is the preferred show/hide key. The footer shows the
+key actually registered in the current process.
 
-## 设计约束
+English controls use compact labels: `W` means width, `H` height, `Gap` character
+spacing, `Asc` ascent, `Desc` descent, `Line` line spacing, and `Wgt` font weight.
+The guide defines these full terms and explains their effects. Reference controls
+use `Set Ref`, `Match Ref`, and `Reset`. Text mapping and code-page controls use
+short `Map` and `CP` labels, with their full meanings explained in the guide.
+Preview text is English. Labels, values, and guide text must fit their available
+space throughout the supported UI zoom range.
 
-- 绘制代码只读取状态，输入代码只形成操作意图，配置写入集中在 `apply_config`。
-- 字体列表保留用户选择的源字体名；字体表克隆使用独立内部名称，避免克隆名污染来源
-  定位和 Ren'Py、Unity 等文件型字体路径。
-- 双缓冲绘制资源按窗口尺寸复用，窗口销毁时统一释放。
-- 窗口最小客户区为 `480×640` 逻辑像素。该尺寸为三列度量控件、两行字体列表和完整预览
-  保留稳定空间，拖动边框不会进入控件互相覆盖的布局范围。
-- 选择器保留标准顶层窗口语义供 DWM 计算任务栏过渡，`DWMNCRP_DISABLED`、`WM_NCCALCSIZE`
-  和 `WM_NCPAINT` 共同隔离系统非客户区；标题、边框和按钮全部由客户端绘制。关闭和隐藏由
-  窗口定时器驱动，只改变 layered alpha 和位置，最小化与还原使用顶层窗口原生状态。
-  `WM_CLOSE` 仍直接进入消息循环退出路径。
-- `SPI_GETCLIENTAREAANIMATION` 关闭时，关闭/隐藏路径使用即时显隐，保持系统的动画偏好。
-- 选择器只呈现跨引擎配置。`YurisAtlasCodepage` 等引擎专用诊断覆盖键由 `FontHook.ini`
-  管理，避免与文字映射、字符集伪装或代码页重定向形成界面层关联。
-- 指南页面不写入配置；切换页面时结束正在进行的度量输入，并隔离隐藏页面的列表、滚轮、
-  双击和键盘应用操作。
-- 指南正文按当前可用宽度计算中英文换行，英文标识符优先保持完整；多行文本使用随 UI
-  缩放变化的显式行距。章节切换回到顶部，滚轮、滚动条拖动和轨道翻页共享同一滚动范围。
-- 配置通知在锁外执行；UI 线程不等待引擎工作线程完成字体应用。
-- 控件需要同时定义布局、绘制、命中测试、配置保存与恢复路径。
+## Design Constraints
 
-## 验证
+- Drawing code only reads state, input code only forms action intent, and configuration writes are centralized in `apply_config`.
+- The font list preserves the user's selected source font name. Font-table clones use separate internal names so clone names do not interfere with source resolution or file-based font paths in Ren'Py, Unity, and similar engines.
+- Double-buffered drawing resources are reused by window size and released together when the window is destroyed.
+- The minimum client area is `480×640` logical pixels; the default client area is `480×720`. The UI zoom range remains `0.7–1.8`. The minimum size provides two font-list rows at scale 1.0 and one scrollable row at scale 1.8, alongside three columns of metric controls and the preview.
+- Picker captions and numeric values use measured text fitting inside fixed rectangles. Spoof and Map/CP drawing and hit testing share labels, fitted fonts, and row geometry. Preview samples scale together to fit their panel; this changes presentation only, leaving game font configuration intact.
+- The picker retains standard top-level window semantics so DWM can compute taskbar transitions. `DWMNCRP_DISABLED`, `WM_NCCALCSIZE`, and `WM_NCPAINT` isolate the system non-client area; the client draws all title, border, and button elements. Close and hide are driven by a window timer and change only layered alpha and position. Minimize and restore use native top-level window state. `WM_CLOSE` still enters the message-loop exit path directly.
+- When `SPI_GETCLIENTAREAANIMATION` is disabled, close/hide paths change visibility immediately to respect the system animation preference.
+- The picker exposes only cross-engine configuration. Engine-specific diagnostic override keys such as `YurisAtlasCodepage` are managed through `FontHook.ini`, preventing UI-level coupling with text mapping, character-set spoofing, or code-page redirection.
+- The guide page does not write configuration. Page switches end active metric input and isolate list, wheel, double-click, and keyboard-application actions belonging to the hidden page.
+- Guide text wraps to the available width, keeping English identifiers intact where possible. Multiline text uses explicit line spacing that follows UI zoom. Switching sections returns to the top; the mouse wheel, scrollbar dragging, and track paging share one scroll range.
+- Configuration notifications run outside locks; the UI thread does not wait for engine worker threads to finish font application.
+- Each control needs layout, drawing, hit testing, and configuration save/restore paths defined together.
 
-覆盖首次启动、已有配置恢复、字体与指南页面切换、字体搜索与键盘选择、本地字体、度量
-编辑、字符集与文字映射开关、窗口显示切换与显隐动画、连续字体应用、非 ASCII 路径和
-正常退出。
+## Validation
 
-## 证据与复刻
+Cover first startup, restoration of existing configuration, Fonts/Guide page switches,
+font search and keyboard selection, local fonts, metric editing, character-set and
+text-mapping switches, window visibility and show/hide animation, repeated font
+application, non-ASCII paths, and normal shutdown.
 
-入口符号为 `FontPicker::Init`、`Toggle`、`IsVisible`、`Shutdown`，配置应用集中在
-`internal/font_picker_apply_config.cppinc`。复刻 UI 行为时保存初始 `FontHook.ini`、
-字体列表快照、应用前后的 `ConfigVersion` 和 `FontHook.trace.log`；窗口消息只作为
-配置通知和重绘证据，不作为引擎身份证据。
+## Evidence and Reproduction
 
-| 场景 | 观测 | 预期 |
+Entry symbols are `FontPicker::Init`, `Toggle`, `IsVisible`, and `Shutdown`;
+configuration application is centralized in
+`internal/font_picker_apply_config.cppinc`. To reproduce UI behavior, save the initial
+`FontHook.ini`, a font-list snapshot, `ConfigVersion` before and after application,
+and `FontHook.trace.log`. Window messages are evidence of configuration notification
+and redraw only, not engine identity.
+
+| Scenario | Observation | Expected result |
 | --- | --- | --- |
-| 启动恢复 | `Init` 读取有效 `FontNameW` | 列表和度量显示配置快照 |
-| 应用字体 | `apply_config` 完成范围校验和保存 | 版本递增，通知在锁外发布 |
-| 打开使用指南 | 点击 `指南` 页签或按 `Tab` | 搜索框隐藏，字体配置保持原值 |
-| 返回字体设置 | 点击 `字体` 页签或按 `Tab` | 搜索框恢复，列表输入重新启用 |
-| 非 ASCII 路径 | 字体文件路径含 UTF-8 字符 | 配置、列表和克隆来源保持一致 |
-| 自绘标题控件关闭 | 定时器帧更新 alpha 与位置 | 动画结束后隐藏窗口 |
-| 自绘标题控件最小化 | `WM_SYSCOMMAND/SC_MINIMIZE` | DWM 将窗口收回任务栏分组图标 |
-| 关闭窗口 | `Shutdown` 发布退出消息 | UI 线程退出，不等待引擎工作线程 |
+| Startup restoration | `Init` reads a valid `FontNameW` | The list and metrics display the configuration snapshot |
+| Apply font | `apply_config` completes bounds validation and saving | The version increments; notifications are published outside locks |
+| Open the user guide | Click the `Guide` tab or press `Tab` | The search box is hidden and font configuration keeps its values |
+| Return to font settings | Click the `Fonts` tab or press `Tab` | The search box returns and list input is enabled again |
+| Non-ASCII path | The font-file path contains UTF-8 characters | Configuration, list, and clone sources remain consistent |
+| Close through the custom title control | Timer frames update alpha and position | The window hides after the animation finishes |
+| Minimize through the custom title control | `WM_SYSCOMMAND/SC_MINIMIZE` | DWM moves the window into the grouped taskbar icon |
+| Shut down the window | `Shutdown` publishes an exit message | The UI thread exits without waiting for engine worker threads |
 
-完整输入固定和结果判定见 [功能证据与复刻流程](../../docs/reproduction.md)。
+See [Feature Evidence and Reproduction](../../docs/reproduction.md) for full input
+pinning and result interpretation.

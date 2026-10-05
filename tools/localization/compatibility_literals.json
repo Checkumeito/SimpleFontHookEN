@@ -1,0 +1,23 @@
+{
+  "SimpleFontHook/hooks/internal/font_hooks_text_substitution_map.cppinc": {
+    "whole_file": "Immutable character mapping pairs and their sortedness checks; preserve the original data."
+  },
+  "SimpleFontHook/hooks/internal/engines/bgi/bgi_compat_state.cppinc": {
+    "literals": {"\u65e5\u672c\u8a9e\u3042\u30a2\u6f22": "Exact font-metric probe glyphs."}
+  },
+  "SimpleFontHook/hooks/internal/engines/yuris/yuris_catalog.cppinc": {
+    "literals": {"\u592a": "Bold resource style marker.", "\u5f71": "Shadow resource style marker.", "\u888b": "Outline resource style marker."}
+  },
+  "SimpleFontHook/font/font_patcher.cpp": {
+    "literals": {"\uff08": "Full-width opening parenthesis in font-name matching.", "\uff09": "Full-width closing parenthesis in font-name matching."}
+  },
+  "SimpleFontHook/ui/internal/font_picker_font_list.cppinc": {
+    "literals": {"\uff08": "Full-width variant delimiter in actual font names."}
+  },
+  "SimpleFontHook/hooks/internal/engines/yuris/README.md": {
+    "literals": {"\u6e90\u30ce\u89d2\u30b4\u30b7\u30c3\u30af": "Actual source resource directory stem.", "\u592a": "Actual bold style marker.", "\u5f71": "Actual shadow style marker.", "\u888b": "Actual outline style marker.", "\uff0c\u3001\u3002\uff0e\uff1b\uff1a\uff01\uff1f": "Exact atlas punctuation probes.", "\u2025\u30fb\u00b7\u2022\uff65\u2027": "Exact optically centered dot glyphs."}
+  },
+  "docs/diagnostics.md": {
+    "literals": {"\u3001\u3002": "Exact Big5 punctuation glyph examples."}
+  }
+}

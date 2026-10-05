@@ -1,116 +1,123 @@
-# 钩子模块
+# Hooks Module
 
-## 职责
+## Responsibilities
 
-`hooks/` 负责 Detours 安装、字体替换模型、字体 API 查询、文本绘制和引擎适配。
-公共入口为 `FontHooks::Install(HMODULE)`、配置通知与正常退出接口。
+`hooks/` handles Detours installation, the font-replacement model, font API queries,
+text drawing, and engine adaptation. Its public entry points are
+`FontHooks::Install(HMODULE)`, configuration notification, and normal shutdown.
 
-通用钩子的核心任务，是让同一个替换字体在“创建、选择、绘制、度量、身份查询和原始
-字体数据查询”中保持一致。只改 `CreateFont*` 会让程序从查询接口看到互相矛盾的字体
-名称、字符集或尺寸，因此这些 API 由统一模型和缓存共同处理。
+The generic hooks keep the same replacement font consistent across creation,
+selection, drawing, measurement, identity queries, and raw font-data queries.
+Changing only `CreateFont*` would expose contradictory font names, character sets,
+or dimensions through query interfaces. These APIs therefore share one model and
+cache system.
 
-## 聚合结构
+## Aggregate Structure
 
-`font_hooks.cpp` 按固定顺序包含 `internal/**/*.cppinc`，形成单一钩子翻译单元。该结构让
-原始 API 指针、Detours 目标、字体缓存和引擎状态保持内部链接。
+`font_hooks.cpp` includes `internal/**/*.cppinc` in a fixed order to form one hook
+translation unit. This keeps original API pointers, Detours targets, font caches,
+and engine state under internal linkage.
 
-| 路径 | 职责 |
+| Path | Responsibility |
 | --- | --- |
-| `font_hooks.h` | 钩子子系统公共接口 |
-| `font_hooks.cpp` | 实现聚合和包含顺序 |
-| `hook_policy.*` | 钩子启用、兼容策略和调试采样 |
-| `internal/font_hooks_*.cppinc` | 安装、运行时、绘制、代码页和文字映射 |
-| `internal/model/` | 字体替换缓存、逻辑字体视图、度量和字形索引 |
-| `internal/queries/` | 字体标识、枚举、度量和字体数据查询 |
-| `internal/engines/` | 引擎检测、资源、缓存和运行时桥接 |
+| `font_hooks.h` | Public interface of the hook subsystem |
+| `font_hooks.cpp` | Implementation aggregation and include order |
+| `hook_policy.*` | Hook enablement, compatibility policy, and debug sampling |
+| `internal/font_hooks_*.cppinc` | Installation, runtime, drawing, code pages, and text mapping |
+| `internal/model/` | Font-replacement caches, logical font views, metrics, and glyph indices |
+| `internal/queries/` | Font identity, enumeration, metric, and font-data queries |
+| `internal/engines/` | Engine detection, resources, caches, and runtime bridges |
 
-## 钩子类别
+## Hook Categories
 
-- `AttachFontCreationHooks`：`CreateFont*` 与 `CreateFontIndirect*`。
-- `AttachRuntimeLibraryHooks`：GDI+、DirectWrite 和延迟模块加载。
-- `AttachTextDrawingHooks`：`TextOut`、`ExtTextOut` 与 `DrawText`。
-- `AttachDcFontSelectionHooks`：HDC 与 HFONT 选择状态。
-- `AttachGlyphOutlineHooks`：字形位图、轮廓和索引。
-- `AttachTextLayoutMetricHooks`：宽度、范围、ABC 度量与字距。
-- `AttachFontIdentityQueryHooks`：`GetObject`、`GetTextMetrics` 与 `GetTextFace`。
-- `AttachFontEnumerationHooks`：字体族与扩展 LOGFONT 枚举。
-- `AttachGlyphMetricSupplementHooks`：字距调整和字形定位信息。
-- `AttachFontDataQueryHooks`：SFNT 表、字符范围、语言和轮廓度量。
-- `AttachDirectWriteHooks`：`DWriteCreateFactory` 与工厂虚表。
+- `AttachFontCreationHooks`: `CreateFont*` and `CreateFontIndirect*`.
+- `AttachRuntimeLibraryHooks`: GDI+, DirectWrite, and deferred module loading.
+- `AttachTextDrawingHooks`: `TextOut`, `ExtTextOut`, and `DrawText`.
+- `AttachDcFontSelectionHooks`: HDC and HFONT selection state.
+- `AttachGlyphOutlineHooks`: Glyph bitmaps, outlines, and indices.
+- `AttachTextLayoutMetricHooks`: Widths, extents, ABC metrics, and character spacing.
+- `AttachFontIdentityQueryHooks`: `GetObject`, `GetTextMetrics`, and `GetTextFace`.
+- `AttachFontEnumerationHooks`: Font-family and extended LOGFONT enumeration.
+- `AttachGlyphMetricSupplementHooks`: Kerning and glyph-positioning information.
+- `AttachFontDataQueryHooks`: SFNT tables, character ranges, languages, and outline metrics.
+- `AttachDirectWriteHooks`: `DWriteCreateFactory` and factory vtables.
 
-## 调用流程
+## Call Flow
 
-1. `FontHooks::Install` 加载配置并准备需要在 Detours 事务前完成的静态检测。
-2. `AttachHooksByCategory` 按职责挂接字体、编码、Profile、文件和运行时 API。
-3. 字体创建钩子保存源 `LOGFONT`，构造目标 `LOGFONT` 与替换 `HFONT`，并写入带
-   `ConfigVersion` 的缓存项。
-4. 绘制与查询钩子根据 HDC、原始字体和替换字体查找同一缓存视图，分别返回真实绘制
-   结果与面向程序的逻辑属性。
-5. 引擎文件分派、托管运行时和延迟模块路径覆盖通用字体 API 看不到的资源。
-6. 配置通知清理或版本化各类缓存，并把应用动作投递到要求的线程。
+1. `FontHooks::Install` loads configuration and prepares static detection that must finish before the Detours transaction.
+2. `AttachHooksByCategory` attaches font, encoding, Profile, file, and runtime APIs by responsibility.
+3. Font-creation hooks save the source `LOGFONT`, construct the target `LOGFONT` and replacement `HFONT`, and write a cache entry tagged with `ConfigVersion`.
+4. Drawing and query hooks locate the same cached view using the HDC, original font, and replacement font, returning actual drawing results and application-facing logical properties respectively.
+5. Engine file dispatch, managed runtimes, and deferred module paths cover resources invisible to generic font APIs.
+6. Configuration notification clears or versions caches and dispatches application actions to the required threads.
 
-## 字体替换模型
+## Font-Replacement Model
 
-`internal/model/` 将源 LOGFONT、替换 LOGFONT、HFONT、配置版本和对外查询视图组织为统一
-缓存。模型支持字体名称、字符集、尺寸、字重、垂直度量、字距、行距和字形索引别名。
-编码转换与文字映射使用独立状态，不从替换字体推断文本代码页。
+`internal/model/` organizes source LOGFONT, replacement LOGFONT, HFONT, configuration
+version, and the external query view in one cache. The model supports font names,
+character sets, dimensions, weight, vertical metrics, character spacing, line spacing,
+and glyph-index aliases. Encoding conversion and text mapping use independent state;
+text code pages are not inferred from the replacement font.
 
-## 引擎适配
+## Engine Adaptation
 
-引擎适配器处理内部字体资源、预渲染缓存、归档内容或托管运行时对象。完整引擎列表、
-检测规则和各目录文档见 [internal/engines/README.md](internal/engines/README.md)。
+Engine adapters handle internal font resources, prerendered caches, archive content,
+or managed runtime objects. See [internal/engines/README.md](internal/engines/README.md)
+for the full engine list, detection rules, and directory documentation.
 
-文件型适配统一调用 `engine_file_dispatch.cppinc`。运行时型适配通过窗口消息、工作线程、
-Python pending call、Mono/IL2CPP 线程附加或引擎函数钩子执行。
+File-based adaptation consistently uses `engine_file_dispatch.cppinc`. Runtime
+adaptation uses window messages, worker threads, Python pending calls, Mono/IL2CPP
+thread attachment, or engine-function hooks.
 
-## 设计约束依据
+## Rationale for Design Constraints
 
-- 聚合 `.cppinc` 让原始 API 指针、递归保护和缓存状态保持内部链接，同时用文件边界
-  分隔实现职责。
-- `org*` 指针表示真实系统入口；钩子内部通过它们调用 API，防止内部探测形成递归。
-- 逻辑字体视图把“引擎实际使用的替换对象”和“程序查询时应看到的属性”分开，避免
-  为兼容某个查询而破坏真实渲染对象。
-- `ConfigVersion` 参与缓存身份，使字体名称相同但度量、字符集能力或字体数据不同的
-  配置也能获得独立结果。
-- 高开销检测位于安装、准备或工作线程阶段；每帧路径只执行缓存查找和有界转换。
+- Aggregated `.cppinc` files keep original API pointers, recursion guards, and cache state under internal linkage while file boundaries separate implementation responsibilities.
+- `org*` pointers represent real system entry points. Hooks call APIs through them to prevent internal probing from causing recursion.
+- Logical font views separate the replacement object actually used by the engine from the properties the application should see in queries, so compatibility with one query does not damage the real rendering object.
+- `ConfigVersion` participates in cache identity, allowing distinct results for configurations with the same font name but different metrics, character-set capabilities, or font data.
+- Expensive detection occurs during installation, preparation, or worker-thread stages; per-frame paths perform only cache lookups and bounded conversions.
 
-## 生命周期
+## Lifecycle
 
-1. `FontHooks::Install` 加载配置并准备静态适配状态。
-2. Detours 事务按钩子类别挂接公共 API 与引擎函数。
-3. 事务提交后启动延迟模块、运行时和字体选择器线程。
-4. 配置应用递增 `ConfigVersion` 并通知各缓存与引擎。
-5. 正常退出停止工作线程并关闭句柄；进程分离路径只发布退出信号。
+1. `FontHooks::Install` loads configuration and prepares static adaptation state.
+2. The Detours transaction attaches public APIs and engine functions by hook category.
+3. Deferred-module, runtime, and font-picker threads start after the transaction commits.
+4. Configuration application increments `ConfigVersion` and notifies caches and engines.
+5. Normal shutdown stops worker threads and closes handles; process detach only publishes a shutdown signal.
 
-## 扩展规则
+## Extension Rules
 
-1. 扩展 API 归入职责相符的 `Attach*Hooks` 类别。
-2. 原始函数指针与钩子处理函数位于同一聚合翻译单元。
-3. 兼容决策集中在 `hook_policy.*`。
-4. 高频路径使用缓存状态、有界查找和采样日志。
-5. 引擎专用文件行为通过统一文件分派器发布。
-6. 新引擎目录提供独立 README，并登记到引擎索引。
+1. Place added APIs in the `Attach*Hooks` category matching their responsibility.
+2. Keep original function pointers and hook handlers in the same aggregate translation unit.
+3. Centralize compatibility decisions in `hook_policy.*`.
+4. Use cached state, bounded lookups, and sampled logs in high-frequency paths.
+5. Publish engine-specific file behavior through the common file dispatcher.
+6. Give each new engine directory an independent README and register it in the engine index.
 
-## 验证
+## Validation
 
-通用钩子覆盖字体创建、HDC 选择、绘制、查询、缓存命中、配置关闭和选择器线程。引擎
-适配覆盖正向检测、负向检测、配置版本刷新和目标架构。C++ 修改同时编译 Win32 与 x64
-Release。
+Generic-hook validation covers font creation, HDC selection, drawing, queries, cache
+hits, disabled configuration, and the picker thread. Engine-adaptation validation
+covers positive detection, negative detection, configuration-version refresh, and
+target architecture. C++ changes require both Win32 and x64 Release builds.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-静态入口为 `font_hooks.cpp`、`font_hooks.h`、`hook_policy.*` 和各类
-`Attach*Hooks` 函数；运行时入口为 `FontHooks::Install`、配置通知和退出接口。复刻通用
-字体路径时固定进程架构与 `FontHook.ini`，先记录未安装适配时的创建/查询/绘制结果，
-再逐类启用钩子并对照 `ConfigVersion`、缓存命中和 `org*` 回退日志。
+Static entry points are `font_hooks.cpp`, `font_hooks.h`, `hook_policy.*`, and the
+`Attach*Hooks` functions. Runtime entry points are `FontHooks::Install`, configuration
+notification, and shutdown. To reproduce a generic font path, pin the process
+architecture and `FontHook.ini`. First record creation/query/drawing results without
+the adaptation installed; then enable hooks by category and compare `ConfigVersion`,
+cache hits, and `org*` fallback logs.
 
-| 场景 | 检查入口 | 预期结果 |
+| Scenario | Check entry point | Expected result |
 | --- | --- | --- |
-| 字体创建 | `AttachFontCreationHooks` | 保存源 `LOGFONT`，返回带版本缓存的替换 `HFONT` |
-| 查询/度量 | `AttachFontIdentityQueryHooks`、`AttachTextLayoutMetricHooks` | 查询视图与绘制对象使用同一配置版本 |
-| 内部探测 | `EngineCommon::IsInternalFileQuery` | 适配器探测读取真实 API，不进入虚拟路径 |
-| 配置关闭 | `FontHooks::NotifyConfigChanged` | 缓存失效，未命中时调用 `org*` |
-| 非目标进程 | 身份策略缓存 | 不安装引擎专用逻辑 |
+| Font creation | `AttachFontCreationHooks` | Saves the source `LOGFONT` and returns a replacement `HFONT` in a versioned cache |
+| Queries/metrics | `AttachFontIdentityQueryHooks`, `AttachTextLayoutMetricHooks` | The query view and drawing object use the same configuration version |
+| Internal probing | `EngineCommon::IsInternalFileQuery` | Adapter probes read through real APIs without entering virtual paths |
+| Configuration disabled | `FontHooks::NotifyConfigChanged` | Caches become invalid; a cache miss calls `org*` |
+| Non-target process | Identity-policy cache | No engine-specific logic is installed |
 
-日志、配置快照、样本哈希和命令按 [功能证据与复刻流程](../../docs/reproduction.md)
-记录；高频 API 只保留有界采样。
+Record logs, configuration snapshots, sample hashes, and commands using
+[Feature Evidence and Reproduction](../../docs/reproduction.md). Retain only bounded
+sampling for high-frequency APIs.

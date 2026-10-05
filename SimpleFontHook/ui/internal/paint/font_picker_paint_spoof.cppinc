@@ -13,60 +13,54 @@ static void PaintSpoofBar(HDC mem, const RECT& rc)
     SelectObject(mem, oldSpSep);
     DeleteObject(spSep);
 
-    HFONT spFont = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_NORMAL, DEFAULT_CHARSET);
-    HFONT spFontBold = GetCachedPickerFont(L"Segoe UI", SF(11), 0, FW_BOLD, DEFAULT_CHARSET);
-    HGDIOBJ oldSpFont = SelectObject(mem, spFont);
+    PickerButtonRow row = GetSpoofButtonRow(mem);
+    HGDIOBJ oldSpFont = SelectObject(mem, row.fonts[0]);
 
     int py = spTop + (SPOOF_HEIGHT - 24) / 2;
     int px = 10;
 
     {
-        const wchar_t* label = g_spoofEnabled ? L"\x4F2A\x88C5: \x5F00" : L"\x4F2A\x88C5: \x5173";
-        SelectObject(mem, spFontBold);
-        SIZE sz; GetTextExtentPoint32W(mem, label, (int)wcslen(label), &sz);
-        int bw = sz.cx + 16;
-        RECT btnRc = { px, py, px + bw, py + 24 };
+        const wchar_t* label = row.labels[0];
+        RECT btnRc = row.rects[0];
         COLORREF bgCol = g_spoofEnabled ? RGB(40, 80, 55) : RGB(50, 35, 65);
         if (g_spoofToggleHovered) bgCol = g_spoofEnabled ? RGB(50, 100, 65) : RGB(65, 48, 85);
         FillRoundRect(mem, btnRc, 10, bgCol);
         DrawRoundRectOutline(mem, btnRc, 10, g_spoofEnabled ? RGB(100, 220, 140) : COL_BORDER);
         SetTextColor(mem, g_spoofEnabled ? RGB(100, 255, 160) : COL_TEXT_DIM);
         DrawTextW(mem, label, -1, &btnRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        px += bw + 8;
+        px = btnRc.right + 8;
     }
 
-    SelectObject(mem, spFont);
+    SelectObject(mem, row.fonts[1]);
     {
-        const wchar_t* charsetLabel = g_spoofCharsets[g_spoofCharsetIdx].shortLabel;
-        SIZE sz; GetTextExtentPoint32W(mem, charsetLabel, (int)wcslen(charsetLabel), &sz);
-        int bw = sz.cx + 18;
-        RECT pillRc = { px, py, px + bw, py + 24 };
+        const wchar_t* charsetLabel = row.labels[1];
+        RECT pillRc = row.rects[1];
         COLORREF bgCol = g_spoofCharsetHovered ? COL_HOVER_BG : RGB(38, 30, 56);
         FillRoundRect(mem, pillRc, 10, bgCol);
         DrawRoundRectOutline(mem, pillRc, 10, RGB(145, 190, 255));
         SetTextColor(mem, RGB(185, 215, 255));
         DrawTextW(mem, charsetLabel, -1, &pillRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        px += bw + 8;
+        px = pillRc.right + 8;
     }
 
     {
         wchar_t hint[96] = {};
         if (g_spoofEnabled && g_spoofRuntimeReplaceEnabled) {
             SetTextColor(mem, RGB(255, 195, 160));
-            wsprintfW(hint, L"\x8C03\x7528: %s \x2192 %s",
+            wsprintfW(hint, L"Calls: %s → %s",
                 GetCharsetDisplayName(g_charsets[g_spoofFromIdx].value),
                 GetCharsetDisplayName(g_spoofCharsets[g_spoofCharsetIdx].value));
         } else if (g_spoofEnabled) {
             SetTextColor(mem, RGB(180, 255, 190));
-            wsprintfW(hint, L"\x5B57\x4F53\x6807\x8BC6: %s",
+            wsprintfW(hint, L"Font ID: %s",
                 GetCharsetDisplayName(g_spoofCharsets[g_spoofCharsetIdx].value));
         } else {
             SetTextColor(mem, RGB(110, 95, 145));
-            wsprintfW(hint, L"\x76EE\x6807: %s",
+            wsprintfW(hint, L"Target: %s",
                 GetCharsetDisplayName(g_spoofCharsets[g_spoofCharsetIdx].value));
         }
         RECT hintRc = { px, py, rc.right - 8, py + 24 };
-        DrawTextW(mem, hint, -1, &hintRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(mem, hint, -1, &hintRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
 
     SelectObject(mem, oldSpFont);

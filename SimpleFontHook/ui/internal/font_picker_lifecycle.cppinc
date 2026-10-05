@@ -80,7 +80,7 @@ static void CreatePickerWindow() {
         { HOTKEY_TOGGLE_PICKER_SCROLL_LOCK, MOD_NOREPEAT, VK_SCROLL, "Scroll Lock", L"Scroll Lock" },
     };
     g_toggleHotkeyRegistered = false;
-    wcscpy_s(g_toggleHotkeyDisplayName, L"未注册");
+    wcscpy_s(g_toggleHotkeyDisplayName, L"Unregistered");
     for (const HotKeyCandidate& hotkey : hotkeys) {
         if (RegisterHotKey(g_hWnd, hotkey.id, hotkey.modifiers, hotkey.vk)) {
             g_toggleHotkeyRegistered = true;

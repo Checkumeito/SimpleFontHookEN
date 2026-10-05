@@ -1,95 +1,105 @@
-# Softpal 适配器
+# Softpal Adapter
 
-## 职责
+## Responsibilities
 
-本目录负责 Softpal 的默认位图字体选项和 `Pal.dll` 字体类型。适配器把引擎默认选项
-映射到系统字体分支，使通用 GDI 字体钩子能够提供当前选择的字体。
+This directory handles Softpal's default bitmap-font option and the font type in `Pal.dll`. The
+adapter maps the engine's default option to the system-font branch, allowing generic GDI font
+hooks to provide the currently selected font.
 
-## 通用路径覆盖范围
+## Coverage of the Generic Path
 
-Softpal 在进入 GDI 字体创建前通过 Pal 字体类型和 `DEFAULT_FONT.DAT` 选择位图或系统字体。
-默认类型 `4` 会让文本使用引擎位图资源，通用 GDI 钩子只能看到旁路调用。字体切换因此
-需要先让引擎选择系统字体类型，再由通用模型替换实际字体对象。
+Before entering GDI font creation, Softpal selects bitmap or system fonts through the Pal font
+type and `DEFAULT_FONT.DAT`. The default type `4` directs text to the engine's bitmap resources;
+generic GDI hooks see only calls on the bypass path. Font switching therefore first needs the
+engine to select the system-font type, after which the generic model replaces the actual font
+object.
 
-适配器在 Pal 导出边界规范化类型，并在文件分派器中控制默认位图字体资源的只读可见性。
-两条路径都只负责分支选择，字体度量、字符集和字体数据仍由通用模块提供。
+The adapter normalizes the type at the Pal export boundary and controls read-only visibility of
+the default bitmap-font resource through the file dispatcher. Both paths only select the
+branch; font metrics, character sets, and font data remain the responsibility of generic modules.
 
-## 身份与能力
+## Identity and Capabilities
 
-Softpal 身份由 `PalFontBegin`、`PalFontSetType`、`PalFontGetType` 三个运行时导出确认。
-主模块包含完整导出名称契约时可提前确认；`Pal.dll` 加载后使用真实导出表完成最终绑定。
-动态模块尚未加载时保留导出重试路径。
+Softpal identity is confirmed by three runtime exports: `PalFontBegin`, `PalFontSetType`, and
+`PalFontGetType`. A complete export-name contract in the main module can confirm identity
+early; after `Pal.dll` loads, its real export table completes the final binding. When the dynamic
+module has not yet loaded, the export-retry path is retained.
 
-PAC 后缀、`Pal.dll` 文件名和 `DEFAULT_FONT.DAT` 只参与候选定位与功能路由，不构成独立
-身份条件。
+The PAC extension, `Pal.dll` filename, and `DEFAULT_FONT.DAT` participate only in candidate
+location and feature routing; none is an independent identity condition.
 
-## 文件入口
+## File Entry Points
 
-- `softpal_default_font.cppinc`：引擎检测、Pal 字体类型处理、默认字体文件分类和策略接口。
-- `SoftpalInstallPalFontHooks`：安装 `PalFontBegin` 与 `PalFontSetType` Detours。
-- `engine_file_dispatch.cppinc`：处理 `DEFAULT_FONT.DAT` 文件可见性。
-- 通用字体创建和字体数据钩子：查询 Softpal 的自然宽度与数据替换策略。
+- `softpal_default_font.cppinc`: Engine detection, Pal font-type handling, default-font-file classification, and policy interfaces.
+- `SoftpalInstallPalFontHooks`: Installs `PalFontBegin` and `PalFontSetType` Detours.
+- `engine_file_dispatch.cppinc`: Handles `DEFAULT_FONT.DAT` file visibility.
+- Generic font-creation and font-data hooks: Query Softpal's natural-width and data-replacement policies.
 
-## 实现原理
+## Implementation
 
-1. 主模块标记或已加载 `Pal.dll` 的真实导出表确认完整字体契约。
-2. `SoftpalInstallPalFontHooks` 在导出可用后挂接 `PalFontBegin` 与 `PalFontSetType`。
-3. 字体会话开始或类型变化时读取当前类型，把默认值 `4` 规范化为系统字体值 `1`。
-4. 游戏根目录 `DEFAULT_FONT.DAT` 的只读存在性由统一文件分派器按配置发布。
-5. 系统字体分支进入 GDI 后，通用钩子按 Softpal 策略使用自然替换宽度和字体数据。
-6. 动态模块尚未加载时保留可重试状态，由模块加载路径再次尝试绑定导出。
+1. Main-module markers or the real export table of a loaded `Pal.dll` confirm the complete font contract.
+2. `SoftpalInstallPalFontHooks` attaches `PalFontBegin` and `PalFontSetType` once the exports are available.
+3. Read the current type at font-session start or a type change, normalizing the default value `4` to the system-font value `1`.
+4. The unified file dispatcher exposes read-only existence of the game-root `DEFAULT_FONT.DAT` according to configuration.
+5. Once the system-font branch enters GDI, generic hooks use the natural replacement width and font data according to Softpal's policies.
+6. If the dynamic module has not yet loaded, retain a retryable state; the module-loading path retries export binding.
 
-## 功能
+## Features
 
-- 解析 `PalFontBegin`、`PalFontSetType`、`PalFontGetType` 导出。
-- 将 Softpal 默认字体类型 `4` 映射为系统字体类型 `1`。
-- 在字体会话开始和字体类型变化时规范化当前字体类型。
-- 为游戏根目录内的 `DEFAULT_FONT.DAT` 只读请求提供位图字体开关行为。
-- 使用替换字体的自然宽度和字体数据查询结果参与通用 GDI 路径。
+- Resolves the `PalFontBegin`, `PalFontSetType`, and `PalFontGetType` exports.
+- Maps Softpal's default font type `4` to the system-font type `1`.
+- Normalizes the current font type at font-session start and when the type changes.
+- Provides bitmap-font switch behavior for read-only requests to `DEFAULT_FONT.DAT` in the game root.
+- Uses the replacement font's natural width and font-data query results in the generic GDI path.
 
-## 设计约束依据
+## Rationale for the Design Constraints
 
-- Pal 字体类型是引擎导出契约；适配器处理该接口，不解析专有 DAT 位图格式。
-- 只映射值 `4`，其他用户选择与引擎字体类型保持原语义。
-- 身份要求完整导出集合；`Pal.dll` 文件名、PAC 后缀和 DAT 文件名只用于候选定位。
-- 导出绑定随模块加载重试，避免在 DLL 尚未进入进程时形成永久否定结果。
-- Pal 调用异常被限制在适配器边界，返回值继续遵循引擎函数契约。
+- The Pal font type is an engine export contract; the adapter handles this interface without parsing the proprietary DAT bitmap format.
+- Only value `4` is mapped; other user selections and engine font types retain their original semantics.
+- Identity requires the complete export set; the `Pal.dll` filename, PAC extension, and DAT filename only locate candidates.
+- Export binding retries as modules load, avoiding a permanent negative result while the DLL is not yet in the process.
+- Pal call exceptions are contained at the adapter boundary; return values continue to follow the engine-function contract.
 
-## 配置
+## Configuration
 
 - `EnableSoftpalHook`
 - `SoftpalDisableDefaultFontDat`
 - `SoftpalForceDefaultOptionToSystemFont`
-- 通用字体名称、度量和字符集配置
+- Generic font-name, metric, and character-set settings
 
-## 运行约束
+## Runtime Constraints
 
-- Pal 导出函数完整解析后提交 Detours 事务。
-- Pal 调用使用结构化异常保护，并保留引擎函数的返回值语义。
-- `DEFAULT_FONT.DAT` 分类限定在游戏根目录。
-- 字体类型映射只处理值 `4`，其他选项直接传递。
-- 调试日志使用固定采样上限。
+- Commit the Detours transaction only after all Pal exports have been resolved.
+- Pal calls use structured exception protection and preserve engine-function return-value semantics.
+- `DEFAULT_FONT.DAT` classification is limited to the game root.
+- Font-type mapping handles only value `4`; other options pass through directly.
+- Debug logs use a fixed sampling limit.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 对主模块和已加载 `Pal.dll` 执行导出检查，分别记录 `PalFontBegin`、`PalFontSetType`、
-   `PalFontGetType` 的存在性和地址所属模块。
-2. 在 `Pal.dll` 加载前后调用 `SoftpalInstallPalFontHooks`，记录重试状态、事务结果和绑定导出。
-3. 对字体类型 `4`、`1` 和其他值执行会话开始、设置和查询，保存入参、引擎返回值和最终类型。
-4. 对根目录 `DEFAULT_FONT.DAT` 的只读、属性、写入和根目录外路径分别记录分派结果。
+1. Inspect exports in the main module and loaded `Pal.dll`. Separately record the presence of
+   `PalFontBegin`, `PalFontSetType`, and `PalFontGetType`, and the module owning each address.
+2. Call `SoftpalInstallPalFontHooks` before and after `Pal.dll` loads. Record retry state,
+   transaction results, and bound exports.
+3. Start sessions, set types, and query types for font types `4`, `1`, and other values. Save
+   input parameters, engine return values, and final types.
+4. Separately record dispatch results for read-only requests, attributes, writes, and paths
+   outside the root involving `DEFAULT_FONT.DAT`.
 
-| 场景 | 预期结果 |
+| Scenario | Expected Result |
 | --- | --- |
-| 三个 Pal 导出完整 | 身份与类型能力成立，可安装导出钩子 |
-| `Pal.dll` 尚未加载 | 保留重试状态，不形成否定缓存 |
-| 类型 `4` | 按配置映射为系统字体类型 `1` |
-| 其他类型 | 保持调用参数与返回值语义 |
-| 仅有 PAC/DAT/DLL 文件名 | 身份不成立 |
+| All three Pal exports present | Identity and type capability are established; export hooks can be installed |
+| `Pal.dll` not yet loaded | Retains retry state without caching a negative result |
+| Type `4` | Maps to system-font type `1` according to configuration |
+| Other types | Preserves call-parameter and return-value semantics |
+| Only PAC/DAT/DLL filenames present | Identity is not established |
 
-证据目录包含导出快照、动态加载时序、类型调用记录、`DEFAULT_FONT.DAT` 请求和诊断日志。
-通用模板见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains export snapshots, dynamic-loading timing, type-call records,
+`DEFAULT_FONT.DAT` requests, and diagnostic logs. For the generic template, see
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-覆盖 Pal 启动前后加载、默认字体类型、其他字体类型、`DEFAULT_FONT.DAT`、自然宽度、
-字体数据查询、功能开关、导出缺失、共享 PAC 后缀和同名 DLL 的非 Softpal 程序。
+Cover loading Pal before and after startup, default and other font types, `DEFAULT_FONT.DAT`,
+natural width, font-data queries, feature switches, missing exports, shared PAC extensions, and
+non-Softpal programs with a DLL of the same name.

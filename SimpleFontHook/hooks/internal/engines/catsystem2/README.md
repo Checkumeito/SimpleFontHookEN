@@ -1,99 +1,112 @@
-# CatSystem2 适配器
+# CatSystem2 Adapter
 
-## 职责
+## Responsibilities
 
-本目录适配 classic CatSystem2 的文件字体路径。该引擎会先从游戏根目录的 `font/`
-加载 TTF、OTF 或 TTC 字节，再由 FreeType 生成字形；因此只替换 GDI `HFONT` 不能覆盖
-屏幕上的实际文本。
+This directory adapts the file font path in classic CatSystem2. The engine first loads TTF,
+OTF, or TTC bytes from `font/` in the game root directory, then uses FreeType to generate
+glyphs. Replacing only GDI `HFONT` therefore cannot cover the actual text on screen.
 
-本适配器与 Unity 目录中的 `CatSystemUnity` 无关。后者处理 Mono/IL2CPP 与 TextMeshPro
-对象，本目录只处理 classic CatSystem2 的 Win32 文件字体和字体资源注册。
+This adapter is separate from `CatSystemUnity` in the Unity directory. That adapter handles
+Mono/IL2CPP and TextMeshPro objects; this directory only handles classic CatSystem2 Win32
+file fonts and font resource registration.
 
-## 检测
+## Detection
 
-适配器要求主模块同时满足以下契约：
+The adapter requires the main module to meet all of the following contract conditions:
 
-- 存在 `CatScene` 或 `cs2confx` 引擎标记；
-- 同时存在 `kcFontImage_Win` 和 `kcFontImage_FT` 字体后端标记。
+- A `CatScene` or `cs2confx` engine marker is present.
+- Both `kcFontImage_Win` and `kcFontImage_FT` font backend markers are present.
 
-通用 GDI 导入、`font` 目录、单个字体文件名和 `.int` 后缀均不参与独立身份判定。
-检测结果按进程缓存，文件高频路径只读取缓存结果。
+Generic GDI imports, the `font` directory, a single font filename, and the `.int` suffix do
+not independently determine identity. Detection results are cached per process;
+high-frequency file paths only read the cached results.
 
-## 文件入口
+## File Entry Points
 
 - `font/*.ttf`
 - `font/*.otf`
 - `font/*.ttc`
 - `font/*.otc`
 
-物理目录存在时，原目录枚举保持不变，但每个只读字体文件打开及
-`AddFontResourceA/W` 注册及对应的 `RemoveFontResourceA/W` 卸载会转向当前选择字体的
-真实文件。
+When the physical directory exists, its original enumeration remains unchanged. Each
+read-only font file open, `AddFontResourceA/W` registration, and corresponding
+`RemoveFontResourceA/W` removal is redirected to the real file for the currently selected font.
 
-物理目录不存在、为空或目标字体项缺失时，适配器执行以下回退：
+When the physical directory is missing, empty, or lacks the target font entry, the adapter
+uses the following fallback:
 
-1. 为缺失的 `font` 根目录发布虚拟目录属性；
-2. 在真实 `FindFirstFile` 或 `FindFirstFileEx` 失败后发布一个
-   `SimpleFontHook.*` 字体项；
-3. 搜索句柄来自实际字体文件，因此对应的 `FindNextFile` 和 `FindClose` 保持 Win32
-   原语义；
-4. 打开虚拟路径时仍通过统一文件分发器重定向到真实字体源。
+1. Publish virtual directory attributes for the missing `font` root directory.
+2. Publish one `SimpleFontHook.*` font entry after the real `FindFirstFile` or
+   `FindFirstFileEx` fails.
+3. The search handle comes from the actual font file, so the corresponding `FindNextFile`
+   and `FindClose` retain their original Win32 semantics.
+4. Opening the virtual path still redirects to the real font source through the unified file
+   dispatcher.
 
-游戏目录不会被创建、删除或写入。
+Game directories are not created, deleted, or written to.
 
-## 字体源
+## Font Sources
 
-字体源按以下顺序解析并按 `ConfigVersion` 缓存：
+Font sources are resolved in this order and cached by `ConfigVersion`:
 
-1. `SourceFontNameW` 对应的系统或当前用户字体文件；
-2. `ForcedFontNameW` 对应的字体文件；
-3. `FontFileName` 或 DLL 根目录中的本地 SFNT 文件。
+1. The system or current-user font file corresponding to `SourceFontNameW`.
+2. The font file corresponding to `ForcedFontNameW`.
+3. `FontFileName` or a local SFNT file in the DLL root directory.
 
-适配器服从通用 `EnableFontHook` 和 `EnableFaceNameReplace` 开关，不定义引擎私有配置。
-任一开关关闭、字体源不可用或身份检测不成立时，所有 API 保持原行为。
+The adapter follows the general `EnableFontHook` and `EnableFaceNameReplace` switches and
+defines no engine-private configuration. If either switch is disabled, the font source is
+unavailable, or identity detection fails, all APIs retain their original behavior.
 
-## 运行约束
+## Runtime Constraints
 
-- 仅重定向只读打开，不接管写入、创建或删除。
-- 配置通知使字体源缓存失效；版本通知后的文件打开使用当前快照。
-- CatSystem2 已创建的 FreeType face 不在未知线程上强制销毁。需要重新读取字体文件的
-  场景由引擎自身重载或下次进程启动完成。
-- 虚拟枚举只在原搜索失败后介入，物理 `font` 目录的其他资源和顺序不受影响。
+- Only redirect read-only opens; do not take over writes, creation, or deletion.
+- Configuration notifications invalidate the font source cache. File opens after a version
+  notification use the current snapshot.
+- FreeType faces already created by CatSystem2 are not forcibly destroyed on unknown threads.
+  Scenarios that need to reread font files rely on the engine's own reload or the next process
+  startup.
+- Virtual enumeration only intervenes after the original search fails. Other resources and
+  ordering in the physical `font` directory remain unaffected.
 
-## 诊断
+## Diagnostics
 
-启用 `EnableDebugLog=1` 后查看 `[DEBUG][CatSystem2]`：
+With `EnableDebugLog=1`, inspect `[DEBUG][CatSystem2]`:
 
-- `engine-probe`：身份与字体后端契约；
-- `font-source-ready`：当前选择字体解析到的真实文件；
-- `font-open-redirect`：物理或虚拟字体文件打开重定向；
-- `font-search-fallback`：缺失目录或条目的虚拟枚举；
-- `font-register-redirect`、`font-unregister-redirect`：字体注册与卸载重定向。
+- `engine-probe`: identity and font backend contract.
+- `font-source-ready`: the real file resolved from the currently selected font.
+- `font-open-redirect`: redirection of physical or virtual font file opens.
+- `font-search-fallback`: virtual enumeration for a missing directory or entry.
+- `font-register-redirect`, `font-unregister-redirect`: redirection of font registration and removal.
 
-Win32 与 x64 Release 均需保持可编译；classic CatSystem2 样本通常使用 Win32 产物。
+Both Win32 and x64 Release must remain buildable; classic CatSystem2 samples generally use
+the Win32 build.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 在主模块可读映像中分别记录 `CatScene`/`cs2confx` 与
-   `kcFontImage_Win`/`kcFontImage_FT` 的命中情况；四项按身份组和能力组保存。
-2. 使用存在、空、缺失三种 `font/` 目录建立基线，分别调用属性查询、
-   `FindFirstFile*`、`FindNextFile`、只读打开和字体注册 API。
-3. 保存 `font-source-ready` 的源路径、`ConfigVersion` 和 SFNT 扩展名；检查虚拟条目是否
-   能通过统一文件分派器打开同一来源。
-4. 对写入、创建、删除、根目录外路径和非字体文件执行负向验证。
+1. Record matches for `CatScene`/`cs2confx` and `kcFontImage_Win`/`kcFontImage_FT` separately in
+   the main module's readable image. Retain all four items in identity and capability groups.
+2. Establish baselines with existing, empty, and missing `font/` directories. Call attribute
+   queries, `FindFirstFile*`, `FindNextFile`, read-only opens, and font registration APIs
+   separately.
+3. Retain the source path, `ConfigVersion`, and SFNT extension from `font-source-ready`.
+   Check that the virtual entry opens the same source through the unified file dispatcher.
+4. Perform negative verification for writes, creation, deletion, paths outside the root
+   directory, and non-font files.
 
-| 场景 | 预期日志/结果 |
+| Scenario | Expected log/result |
 | --- | --- |
-| 两组标记均成立且目录有字体 | `engine-probe` 通过，只读打开重定向 |
-| 两组标记均成立但目录缺失 | `font-search-fallback` 发布一个虚拟字体项 |
-| 只有 `CatScene` 或只有 FreeType 标记 | 身份/能力不完整，文件 API 透传 |
-| 写入或创建请求 | 调用真实文件 API，不生成游戏目录 |
-| 配置通知 | 解析当前字体源，既有 FreeType face 由引擎生命周期管理 |
+| Both marker groups match and the directory contains fonts | `engine-probe` passes; read-only opens are redirected |
+| Both marker groups match but the directory is missing | `font-search-fallback` publishes one virtual font entry |
+| Only `CatScene` or only FreeType markers | Identity/capabilities are incomplete; file APIs pass through |
+| Write or creation request | Call the real file APIs; do not generate game directories |
+| Configuration notification | Resolve the current font source; existing FreeType faces are managed by the engine lifecycle |
 
-证据目录包含样本哈希、目录树、`[DEBUG][CatSystem2]` 单次日志、配置快照和 A/W API
-返回值。记录格式见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains sample hashes, directory trees, a single
+`[DEBUG][CatSystem2]` log capture, configuration snapshots, and A/W API return values. See
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md) for the record format.
 
-## 验证
+## Verification
 
-覆盖 Win32/x64 编译、正向标记组合、相似非目标模块、物理目录三种状态、TTF/OTF/TTC/OTC、
-注册与卸载、配置关闭、字体源缺失、非 ASCII 路径和只读/写入语义。
+Cover Win32/x64 builds, positive marker combinations, similar non-target modules, all three
+physical directory states, TTF/OTF/TTC/OTC, registration and removal, disabled configuration,
+missing font sources, non-ASCII paths, and read-only/write semantics.

@@ -1,73 +1,73 @@
-# 自动化代理守则
+# Automation Agent Rules
 
-本文件适用于在仓库中执行代码或文档修改的自动化代理。
+This file applies to automation agents making code or documentation changes in
+this repository.
 
-## 开始工作
+## Getting Started
 
-1. 先阅读 `README.md`、`CONTRIBUTING.md`、`docs/architecture.md` 和目标模块 README。
-2. 检查工作区现状，保留与当前任务无关的已有修改。
-3. 先定位实际调用链、配置默认值和目标架构，再决定修改位置。
-4. 已知位置的小文件由主任务直接读取；跨目录检索可交给探索子任务，但最终修改的
-   代码必须由实施者亲自阅读。
+1. Read `README.md`, `CONTRIBUTING.md`, `docs/architecture.md`, and the target module's README first.
+2. Check the workspace state and preserve existing changes unrelated to the current task.
+3. Locate the actual call chain, configuration defaults, and target architecture before choosing where to make changes.
+4. The main task reads small files at known locations directly. Cross-directory searches may be delegated to exploration subtasks, but the implementer must personally read the code they ultimately modify.
 
-## 子代理使用
+## Subagents
 
-子代理是探索工具，默认只负责检索、阅读和独立核验，不负责最终方案取舍、代码修改
-或最终验证。
+Subagents are exploration tools. By default, they only search, read, and independently
+verify. They do not choose the final approach, modify code, or perform final verification.
 
-- 巨型文件、跨目录检索、多个独立问题和大量日志分析应优先并发派发。
-- 已知位置的小文件、即将修改的代码和架构基础文档由主任务亲自完整阅读。
-- 派发任务必须说明范围、具体问题和期望输出；重要结论要求返回文件、行号和符号名。
-- 主任务按子代理给出的定位抽查关键出处，不重新通读已外包的全部材料。
-- 多个独立探索任务同轮派发；派发后先等待结果，再继续依赖这些结果的分析和修改。
-- 子代理使用默认角色并保持独立上下文，不复用子代理执行后续修改。
-- 子代理长时间无进展或工具不可用时，采用已有部分结果并由主任务接管。
+- Prefer concurrent delegation for huge files, cross-directory searches, multiple independent questions, and large amounts of log analysis.
+- The main task personally reads small files at known locations, code about to be modified, and foundational architecture documents in full.
+- Delegated tasks must specify the scope, concrete question, and expected output. Important conclusions must include files, line numbers, and symbol names.
+- The main task spot-checks key sources identified by subagents rather than rereading all delegated material.
+- Dispatch multiple independent exploration tasks in the same round. Wait for their results before continuing analysis or changes that depend on those results.
+- Use the default subagent role with independent context. Do not reuse exploration subagents for subsequent modifications.
+- If a subagent makes no progress for a long time or its tools are unavailable, use its partial results and let the main task take over.
 
-使用子代理的目标是减少主线程上下文污染和提高并行度，不应把小任务拆分到比直接
-处理成本更高的程度。
+Subagents should reduce context clutter in the main task and improve parallelism.
+Do not split small tasks so finely that delegation costs more than direct handling.
 
-## 本地文件工具
+## Local File Tools
 
-- 文件查找、内容搜索和读取优先使用 FastCtx 的 `glob`、`grep` 和 `read`。
-- 机械批量替换优先使用 FastCtx `replace`，先进行 dry-run 并限制最大替换数。
-- 语义修改、新文件和小范围编辑使用 `apply_patch`。
-- 终端命令优先使用 FastCtx shell；长时间构建和测试使用后台任务并持续读取结果。
-- 搜索时排除 `Release/`、`x64/Release/` 和其他生成目录，避免把二进制字符串当作源码。
+- Prefer FastCtx `glob`, `grep`, and `read` for finding files, searching content, and reading.
+- Prefer FastCtx `replace` for mechanical bulk replacements. Run a dry run first and limit the maximum replacement count.
+- Use `apply_patch` for semantic changes, new files, and small edits.
+- Prefer FastCtx shell for terminal commands. Use background tasks for long builds and tests, and continue reading their results.
+- Exclude `Release/`, `x64/Release/`, and other generated directories from searches to avoid treating binary strings as source code.
 
-## 项目不变量
+## Project Invariants
 
-- 不把字体替换与代码页转换绑定。
-- 不为单个样本创建缺少通用接口价值的引擎专用模块。
-- 不以通用 GDI 导入、窗口类或单个文件名作为引擎识别的唯一证据。
-- 不以文件扩展名或通用归档名作为引擎身份；后缀只用于已确认引擎的资源路由。
-- 引擎身份、版本能力和资源请求分类保持为三个独立判断阶段。
-- 不绕过 `engine_file_dispatch.cppinc` 复制文件重定向逻辑。
-- 不把 `.cppinc` 单独编译；它们由聚合 `.cpp` 包含并保持内部链接。
-- 不在高频钩子中执行重复磁盘扫描、归档解析或无界日志。
-- 不在加载器锁退出路径等待工作线程。
-- 不编辑 `Release/`、`x64/Release/` 或项目中间目录内的生成文件。
+- Do not couple font replacement to code page conversion.
+- Do not create an engine-specific module for a single sample without value as a general interface.
+- Do not use general GDI imports, window classes, or a single filename as the sole evidence for engine identification.
+- Do not identify engines by file extensions or general archive names. Extensions only route resources for an already confirmed engine.
+- Keep engine identity, version capabilities, and resource request classification as three separate decision stages.
+- Do not bypass `engine_file_dispatch.cppinc` by duplicating file redirection logic.
+- Do not compile `.cppinc` files separately. Aggregate `.cpp` files include them, and they retain internal linkage.
+- Do not perform repeated disk scans, archive parsing, or unbounded logging in high-frequency hooks.
+- Do not wait for worker threads in shutdown paths under the loader lock.
+- Do not edit generated files in `Release/`, `x64/Release/`, or project intermediate directories.
 
-## 修改要求
+## Change Requirements
 
-- 使用项目现有命名、状态管理、缓存和 `org*` API 模式。
-- 新功能默认保持原行为，必要时添加可关闭配置。
-- 配置修改同时覆盖声明、默认值、保存、加载、UI 和运行时刷新。
-- 引擎适配修改同时检查正向识别与非目标程序误判。
-- 字体表修改进行完整边界检查并维护校验和。
-- 注释说明原因、不变量或异常布局，不复述代码。
+- Follow the project's existing naming, state management, caching, and `org*` API patterns.
+- New features preserve existing behavior by default. Add a disableable configuration option when needed.
+- Configuration changes cover declarations, defaults, saving, loading, UI, and runtime refresh together.
+- Engine adaptation changes check both positive identification and false positives in non-target applications.
+- Font table changes perform complete bounds checking and maintain checksums.
+- Comments explain reasons, invariants, or unusual layouts rather than restating code.
 
-## 验证要求
+## Verification Requirements
 
-- C++ 修改完成后编译 Win32 与 x64 Release。
-- 修改代理导出、项目文件或链接选项时检查 DLL 导出表。
-- 只运行与变更风险匹配的验证，不反复启动目标程序验证同一事实。
-- 构建失败时先修复首个真实编译错误，不通过删除功能规避。
-- 最终说明修改文件、行为变化、构建结果和未执行的验证。
+- Build Win32 and x64 Release after C++ changes.
+- Check the DLL export table when modifying proxy exports, project files, or linker options.
+- Run verification appropriate to the change's risk. Do not repeatedly start the target application to verify the same fact.
+- When a build fails, fix the first real compiler error. Do not remove features to work around it.
+- The final report identifies changed files, behavior changes, build results, and verification not performed.
 
-## 文档要求
+## Documentation Requirements
 
-- 新文档使用简体中文 UTF-8。
-- 保留代码标识符、路径、API、配置键和产品名称的原始拼写。
-- README 记录当前职责、功能、接口、配置和约束；排障过程写入 `docs/diagnostics.md`。
-- 每个 `hooks/internal/engines/<engine>/` 目录维护独立 README，并同步登记到引擎索引。
-- 文档使用当前状态语态；代码变更历史保留在提交记录或 ADR。
+- Write new documentation in English using UTF-8.
+- Preserve the original spelling of code identifiers, paths, APIs, configuration keys, and product names.
+- README files describe current responsibilities, features, interfaces, configuration, and constraints. Put troubleshooting procedures in `docs/diagnostics.md`.
+- Maintain a separate README in each `hooks/internal/engines/<engine>/` directory and update the engine index at the same time.
+- Describe the current state in documentation. Keep code change history in commits or ADRs.

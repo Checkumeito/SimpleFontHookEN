@@ -1,92 +1,106 @@
-# TinkerBell 适配器
+# TinkerBell Adapter
 
-## 职责
+## Responsibilities
 
-本目录为 TinkerBell/Cyberworks 的 GDI 调用方式提供钩子策略。适配器选择字体创建入口
-和 `SelectObject` 跟踪范围，避免宽字符字体创建与未跟踪 DC 对该引擎渲染状态产生干扰。
+This directory provides hook policies for TinkerBell/Cyberworks' GDI calling patterns. The
+adapter selects font-creation entry points and the scope of `SelectObject` tracking, preventing
+wide-character font creation and untracked DCs from interfering with the engine's rendering
+state.
 
-## 策略适配边界
+## Policy Adaptation Boundary
 
-TinkerBell 的兼容点位于通用 GDI 钩子的安装范围与 `SelectObject` 处理边界，而不是专有
-字体资源。为此单独安装一组引擎钩子会复制字体模型，并让同一个 HFONT 同时经过两套状态。
+TinkerBell's compatibility points are the installation scope of the generic GDI hooks and the
+`SelectObject` handling boundary, rather than proprietary font resources. Installing a separate
+set of engine hooks for this would duplicate the font model and put the same HFONT through two
+sets of state.
 
-本模块只回答“哪些通用入口参与当前进程”和“未跟踪对象是否透传”。实际字体创建、对象
-缓存、度量和绘制仍由通用钩子完成。
+This module answers only which generic entry points participate in the current process and
+whether untracked objects pass through. Generic hooks still perform actual font creation, object
+caching, metrics, and drawing.
 
-## 身份与能力
+## Identity and Capabilities
 
-TinkerBell 身份由主模块中的 `Software\\TinkerBell\\`、
-`Cyberworks "TinkerBell"` 强标记，或 `Cyberworks` 与 `TinkerBell` 标记对确认。查询范围
-限定在主模块已映射且可读的内存区域，结果在进程生命周期内缓存。
+TinkerBell identity is confirmed by the strong `Software\\TinkerBell\\` or
+`Cyberworks "TinkerBell"` markers in the main module, or by the `Cyberworks` and `TinkerBell`
+marker pair. Queries are limited to mapped, readable memory regions in the main module, and
+the result is cached for the process lifetime.
 
-DAT 归档名、`render.dll` 和其他通用文件名不参与引擎定案。
+DAT archive names, `render.dll`, and other generic filenames do not determine engine identity.
 
-## 文件入口
+## File Entry Points
 
-- `tinkerbell_compat.cppinc`：模块身份扫描和策略查询。
-- `hook_policy.cpp`：包含本模块并调用兼容策略。
-- `HookPolicy::ShouldAttach`：决定 `CreateFontW` 与 `CreateFontIndirectW` 的挂接。
-- `HookPolicy::ShouldPassThroughUntrackedSelectObject`：控制未跟踪字体选择。
+- `tinkerbell_compat.cppinc`: Module identity scanning and policy queries.
+- `hook_policy.cpp`: Includes this module and calls its compatibility policies.
+- `HookPolicy::ShouldAttach`: Determines attachment of `CreateFontW` and `CreateFontIndirectW`.
+- `HookPolicy::ShouldPassThroughUntrackedSelectObject`: Controls selection of untracked fonts.
 
-## 实现原理
+## Implementation
 
-1. 首次策略查询在主模块可读映像范围内收集 TinkerBell/Cyberworks 强标记。
-2. `IsCompatibilityActive` 组合引擎身份和 `EnableTinkerBellHook`。
-3. 安装阶段通过 `HookPolicy::ShouldAttach` 决定宽字符字体创建入口是否进入 Detours 事务。
-4. `SelectObject` 高频路径只读取缓存策略；未跟踪 HFONT 按配置直接调用真实 API。
-5. 已被字体模型跟踪的对象继续经过替换、HDC 选择状态和查询视图维护。
+1. The first policy query collects strong TinkerBell/Cyberworks markers from the readable image
+   ranges of the main module.
+2. `IsCompatibilityActive` combines engine identity with `EnableTinkerBellHook`.
+3. During installation, `HookPolicy::ShouldAttach` determines whether wide-character
+   font-creation entry points enter the Detours transaction.
+4. The high-frequency `SelectObject` path reads only the cached policy; untracked HFONTs call
+   the real API directly according to configuration.
+5. Objects already tracked by the font model continue through replacement, HDC selection-state
+   maintenance, and query-view maintenance.
 
-## 功能
+## Features
 
-- 为匹配的 TinkerBell 进程采用 ANSI/通用字体创建兼容路径。
-- 对未被字体替换模型跟踪的 `SelectObject` 调用使用透传策略。
-- 保持已跟踪 HFONT 的替换、度量和绘制功能。
-- 将引擎识别结果集中提供给通用 `hook_policy`，无需在高频钩子重复扫描。
+- Uses the ANSI/generic font-creation compatibility path for matching TinkerBell processes.
+- Applies a pass-through policy to `SelectObject` calls not tracked by the font-replacement model.
+- Preserves replacement, metrics, and drawing for tracked HFONTs.
+- Centrally provides engine identification to generic `hook_policy`, without repeated scans in high-frequency hooks.
 
-## 设计约束依据
+## Rationale for the Design Constraints
 
-- 策略模块不拥有字体或 HDC 状态，避免产生第二套缓存和生命周期。
-- 标记扫描只执行一次，`SelectObject` 等每帧入口只读取布尔结果。
-- 安装点策略与运行时透传策略分别表达，便于组合不同版本的调用特征。
-- 通用 DAT、DLL 和目录布局不参与身份判断，策略只对有强模块证据的进程生效。
-- 配置关闭时所有策略回到通用默认值，模块本身没有需要回滚的内存资源。
+- The policy module owns no font or HDC state, avoiding a second cache and lifecycle.
+- Marker scanning runs only once; per-frame entry points such as `SelectObject` read only a Boolean result.
+- Installation-point policies and runtime pass-through policies are expressed separately, allowing different versions' calling patterns to be combined.
+- Generic DAT files, DLLs, and directory layouts do not participate in identity decisions; policies apply only to processes with strong module evidence.
+- Disabling configuration returns all policies to generic defaults; the module itself has no memory resources to roll back.
 
-## 配置
+## Configuration
 
 - `EnableTinkerBellHook`
 - `CompatHookCreateFontW`
 - `CompatHookCreateFontIndirectW`
 - `CompatSelectObjectTrackedOnly`
-- 通用字体名称、度量和字符集配置
+- Generic font-name, metric, and character-set settings
 
-## 运行约束
+## Runtime Constraints
 
-- 模块强标记决定引擎身份，通用目录与文件名不参与策略选择。
-- 模块扫描只访问已提交且可读的映像内存。
-- 检测只在策略首次查询时执行一次。
-- 本模块只返回策略决策，字体对象创建与 DC 跟踪由通用钩子负责。
+- Strong module markers determine engine identity; generic directories and filenames do not select policies.
+- Module scanning accesses only committed, readable image memory.
+- Detection runs only once, at the first policy query.
+- This module returns only policy decisions; generic hooks create font objects and track DCs.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 固定主模块哈希，记录 `Software\\TinkerBell\\`、`Cyberworks "TinkerBell"` 以及
-   `Cyberworks` + `TinkerBell` 标记对的命中组合。
-2. 对每个组合调用 `HookPolicy::ShouldAttach` 和
-   `HookPolicy::ShouldPassThroughUntrackedSelectObject`，保存配置开关与返回值。
-3. 分别选择已跟踪 HFONT、未跟踪 HFONT 和非字体 GDI 对象，记录 `SelectObject` 是否透传。
-4. 以只有 DAT、`render.dll` 或相似目录的程序作为非目标样本。
+1. Fix the main-module hash and record the matched combinations of `Software\\TinkerBell\\`,
+   `Cyberworks "TinkerBell"`, and the `Cyberworks` + `TinkerBell` marker pair.
+2. For each combination, call `HookPolicy::ShouldAttach` and
+   `HookPolicy::ShouldPassThroughUntrackedSelectObject`, saving configuration switches and
+   return values.
+3. Select tracked HFONTs, untracked HFONTs, and nonfont GDI objects separately, and record
+   whether `SelectObject` passes through.
+4. Use programs containing only DAT files, `render.dll`, or similar directories as nontarget samples.
 
-| 身份 | 开关 | 对象状态 | 预期策略 |
+| Identity | Switch | Object State | Expected Policy |
 | --- | --- | --- | --- |
-| TinkerBell | 开 | 宽字符创建入口 | 使用适配器定义的挂接集合 |
-| TinkerBell | 开 | 未跟踪 HFONT | 调用真实 `SelectObject` |
-| TinkerBell | 开 | 已跟踪 HFONT | 进入通用字体模型 |
-| TinkerBell | 关 | 任意 | 使用通用默认策略 |
-| 非目标 | 任意 | 任意 | 使用通用默认策略 |
+| TinkerBell | Enabled | Wide-character creation entry point | Uses the attachment set defined by the adapter |
+| TinkerBell | Enabled | Untracked HFONT | Calls the real `SelectObject` |
+| TinkerBell | Enabled | Tracked HFONT | Enters the generic font model |
+| TinkerBell | Disabled | Any | Uses the generic default policy |
+| Nontarget | Any | Any | Uses the generic default policy |
 
-证据材料包含标记组合、策略返回值、对象跟踪状态和有限采样日志。记录格式见
-[功能证据与复刻流程](../../../../../docs/reproduction.md)。
+Evidence includes marker combinations, policy return values, object-tracking state, and bounded
+sampled logs. For the record format, see
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-覆盖强标记、标记对、相似 DAT/DLL 布局、模块标记缺失、宽字符创建策略、
-未跟踪与已跟踪 `SelectObject`、功能开关和相似目录布局程序。
+Cover strong markers, marker pairs, similar DAT/DLL layouts, missing module markers,
+wide-character creation policies, untracked and tracked `SelectObject`, feature switches, and
+programs with similar directory layouts.

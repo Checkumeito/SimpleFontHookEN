@@ -1,112 +1,122 @@
-# Ren'Py 适配器
+# Ren'Py Adapter
 
-## 职责
+## Responsibilities
 
-Ren'Py 使用自带的 FreeType/HarfBuzz 渲染路径。本适配器在 Python 解释器线程维护
-Ren'Py 字体替换映射，并通过 `renpy.config.file_open_callback` 将稳定虚拟字体名连接到
-当前源字体文件。
+Ren'Py uses its own FreeType/HarfBuzz rendering path. This adapter maintains Ren'Py's
+font-replacement mapping on the Python interpreter thread and uses
+`renpy.config.file_open_callback` to connect stable virtual font names to the current
+source-font file.
 
-## Python 调度边界
+## Python Scheduling Boundary
 
-Ren'Py 的文本布局、字体加载与缓存都位于 Python 和原生 FreeType/HarfBuzz 扩展中，
-字体创建不会经过 GDI 或 DirectWrite。直接替换磁盘文件既无法覆盖脚本字体别名，也会
-破坏游戏自定义的 `file_open_callback` 和字体映射。
+Ren'Py's text layout, font loading, and caches reside in Python and native FreeType/HarfBuzz
+extensions; font creation does not pass through GDI or DirectWrite. Replacing on-disk files
+directly would not cover script font aliases and would disrupt the game's custom
+`file_open_callback` and font mappings.
 
-适配器使用 Ren'Py 公共配置对象表达替换关系：映射表把脚本字体导向稳定虚拟名称，文件
-回调再把虚拟名称导向当前源字体。缓存刷新也通过 Ren'Py 自身入口执行。
+The adapter expresses replacement relationships through Ren'Py's public configuration objects:
+the mapping table directs script fonts to stable virtual names, and the file callback directs
+those virtual names to the current source font. Cache refresh also uses Ren'Py's own entry points.
 
-## 检测条件
+## Detection Conditions
 
-Ren'Py 框架布局要求 `renpy/` 与 `renpy/__init__.py` 存在，并至少包含 `renpy/text`、
-`renpy/display` 或 `renpy/common` 中的一个核心子系统。游戏脚本目录名称和单个字体模块
-文件不参与身份判断。
+The Ren'Py framework layout requires `renpy/` and `renpy/__init__.py`, plus at least one core
+subsystem from `renpy/text`, `renpy/display`, or `renpy/common`. Game-script directory names and
+individual font-module files do not participate in identity decisions.
 
-检测结果在进程生命周期内缓存。
+Detection results are cached for the process lifetime.
 
-## 文件结构
+## File Structure
 
-- `renpy_font.cppinc`：适配器聚合入口。
-- `renpy_state.cppinc`：配置快照、工作线程、Python API 和版本状态。
-- `renpy_detection.cppinc`：根目录识别和路径辅助函数。
-- `renpy_font_source.cppinc`：定位并校验源字体，解析 TTC 字体面索引。
-- `renpy_python_bridge.cppinc`：绑定 Python API、注册虚拟文件回调并构建应用脚本。
-- `renpy_runtime.cppinc`：工作线程、配置通知和退出。
+- `renpy_font.cppinc`: Adapter aggregation entry point.
+- `renpy_state.cppinc`: Configuration snapshots, worker thread, Python APIs, and version state.
+- `renpy_detection.cppinc`: Root-directory identification and path helpers.
+- `renpy_font_source.cppinc`: Source-font location and validation, and TTC font-face index parsing.
+- `renpy_python_bridge.cppinc`: Python API binding, virtual-file callback registration, and application-script construction.
+- `renpy_runtime.cppinc`: Worker thread, configuration notifications, and shutdown.
 
-## 字体源访问
+## Font-Source Access
 
-适配器优先按用户实际选择的 `SourceFontNameW` 定位系统或当前用户安装的字体文件，
-找不到时再检查 `FontFileName` 指向的游戏本地字体。普通 TTF/OTF 只读取 12 字节文件头
-完成基本校验；TTC/OTC 才读取集合目录，并按字体名称选择正确的 face 索引。
+The adapter first uses the user's actual `SourceFontNameW` selection to locate a system or
+current-user installed font file. If it cannot find one, it checks the game-local font referenced
+by `FontFileName`. Ordinary TTF/OTF files need only a 12-byte header read for basic validation;
+only TTC/OTC files require reading the collection directory and selecting the correct face index
+by font name.
 
-Ren'Py 映射使用稳定的 `__simplefonthook__/selected.*` 虚拟名称。文件加载回调收到该名称
-后，以只读二进制方式打开源字体路径。运行时状态由源路径、虚拟名称、TTC face 索引和
-配置版本组成。
+Ren'Py's mapping uses stable virtual names of the form `__simplefonthook__/selected.*`. When the
+font-loading callback receives that name, it opens the source-font path in read-only binary
+mode. Runtime state consists of the source path, virtual name, TTC face index, and configuration
+version.
 
-`SourceFontNameW` 是进程内状态，用来保留用户实际选择的字体。垂直度量或代码页修补创建
-内存字体克隆时，通用 GDI 钩子仍可使用克隆名，而 Ren'Py 始终解析原始字体文件。
+`SourceFontNameW` is in-process state that preserves the font the user actually selected. When
+vertical-metric or code-page patching creates an in-memory font clone, generic GDI hooks can
+still use the clone name, while Ren'Py always resolves the original font file.
 
-## Python 应用流程
+## Python Application Flow
 
-1. 工作线程解析当前 `ConfigVersion` 对应的源字体路径和 TTC face 索引。
-2. 在已加载模块中定位 Python，并解析 `Py_IsInitialized`、`Py_AddPendingCall` 和
-   `PyRun_SimpleString`。
-3. 使用 `Py_AddPendingCall` 将应用回调投递到解释器线程。
-4. 包装 `renpy.config.file_open_callback`，并串联游戏提供的回调。
-5. 包装或恢复 `renpy.config.font_replacement_map`。
-6. 调用 `renpy.text.font.free_memory()` 清理字体缓存。
-7. 启用刷新时调用 `restart_interaction` 重新开始当前交互。
+1. The worker thread resolves the source-font path and TTC face index for the current `ConfigVersion`.
+2. Locate Python among loaded modules and resolve `Py_IsInitialized`, `Py_AddPendingCall`, and `PyRun_SimpleString`.
+3. Use `Py_AddPendingCall` to post the application callback to the interpreter thread.
+4. Wrap `renpy.config.file_open_callback` and chain the game-provided callback.
+5. Wrap or restore `renpy.config.font_replacement_map`.
+6. Call `renpy.text.font.free_memory()` to clear the font cache.
+7. When refresh is enabled, call `restart_interaction` to restart the current interaction.
 
-映射关闭时恢复进入适配器前的文件回调，并清理挂在 `renpy.config` 上的路径状态。
-绝对路径按 UTF-8 十六进制传入 Python，避免 Python 2 源码编码和 Windows 非 ASCII 路径问题。
+When mapping is disabled, restore the file callback from before the adapter was entered and
+clear the path state attached to `renpy.config`. Absolute paths are passed to Python as UTF-8
+hexadecimal data, avoiding Python 2 source-encoding and Windows non-ASCII-path issues.
 
-## 设计约束依据
+## Rationale for the Design Constraints
 
-- 稳定虚拟名称把游戏脚本中的字体标识与 Windows 绝对路径分开，热切换只更新回调状态。
-- 包装现有 `file_open_callback` 并串联原回调，保持游戏自己的资源加载契约。
-- `Py_AddPendingCall` 把状态修改投递到解释器线程，工作线程只执行文件定位和字节校验。
-- `SourceFontNameW` 保存真实来源名称，使通用 GDI 字体表克隆不会污染文件定位。
-- TTC/OTC 只解析集合目录与目标面，普通 TTF/OTF 使用最小头校验，降低准备阶段 I/O。
-- 应用前后核对 `ConfigVersion` 和字体名，过期准备结果不会覆盖较新的用户选择。
+- Stable virtual names separate font identifiers in game scripts from Windows absolute paths; font switching updates only callback state.
+- Wrapping the existing `file_open_callback` and chaining the original callback preserves the game's resource-loading contract.
+- `Py_AddPendingCall` posts state changes to the interpreter thread; the worker thread performs only file location and byte validation.
+- `SourceFontNameW` preserves the real source name so generic GDI font-table clones do not interfere with file location.
+- TTC/OTC parsing is limited to the collection directory and target face; ordinary TTF/OTF files use minimal header validation, reducing preparation-stage I/O.
+- Checking `ConfigVersion` and the font name before and after application prevents stale preparation results from overwriting a newer user selection.
 
-## 配置
+## Configuration
 
 - `EnableRenPyHook`
 - `RenPyRedirectFonts`
 - `RenPyRefreshFontOnSwitch`
-- 通用的 `EnableFontHook`、`EnableFaceNameReplace` 和 `ForcedFontNameW`
+- Generic `EnableFontHook`, `EnableFaceNameReplace`, and `ForcedFontNameW`
 
-## 线程不变量
+## Thread Invariants
 
-- 工作线程只解析和校验字体源，不能直接执行 Python 脚本。
-- Python 状态只在待处理回调所在的解释器线程修改。
-- 配置快照在互斥锁内复制，文件读取和 Python 调用在锁外执行。
-- 提交准备结果前再次校验请求版本与字体名称。
-- 退出时唤醒工作线程，并在正常退出路径有界等待。
+- The worker thread only resolves and validates font sources; it must not execute Python scripts directly.
+- Python state changes only on the interpreter thread running the pending callback.
+- Configuration snapshots are copied under a mutex; file reads and Python calls run outside the lock.
+- Revalidate the requested version and font name before submitting preparation results.
+- On shutdown, wake the worker thread and wait for a bounded time on the normal shutdown path.
 
-## 证据与复刻
+## Evidence and Reproduction
 
-1. 记录 `renpy/`、`renpy/__init__.py` 和至少一个核心子系统的存在性及文件哈希；只有脚本
-   目录或字体文件的样本作为非目标对照。
-2. 保存源字体路径、SFNT/TTC 头、目标字体面、虚拟名称和 `ConfigVersion`。
-3. 分别在 Python 初始化前、初始化后和解释器退出阶段观察 `Py_IsInitialized`、
-   `Py_AddPendingCall`、`PyRun_SimpleString` 的绑定与投递结果。
-4. 安装游戏自定义 `file_open_callback`，记录包装前后回调顺序、虚拟文件返回值和普通资源
-   透传结果。
-5. 启用/关闭映射并切换字体，记录 `font_replacement_map`、`free_memory()`、
-   `restart_interaction` 和非 ASCII 路径结果。
+1. Record the presence and file hashes of `renpy/`, `renpy/__init__.py`, and at least one core
+   subsystem; use samples containing only a script directory or font file as nontarget controls.
+2. Save the source-font path, SFNT/TTC header, target font face, virtual name, and `ConfigVersion`.
+3. Observe binding and posting results for `Py_IsInitialized`, `Py_AddPendingCall`, and
+   `PyRun_SimpleString` before Python initialization, after initialization, and during interpreter
+   shutdown.
+4. Install a game-customized `file_open_callback`. Record callback order before and after
+   wrapping, virtual-file return values, and pass-through results for ordinary resources.
+5. Enable/disable mapping and switch fonts. Record `font_replacement_map`, `free_memory()`,
+   `restart_interaction`, and non-ASCII-path results.
 
-| 场景 | 预期结果 |
+| Scenario | Expected Result |
 | --- | --- |
-| 完整框架清单 + Python API 可用 | 在解释器线程安装映射和文件回调 |
-| 框架成立但 Python 尚未初始化 | 工作线程等待并重试，不执行脚本 |
-| 自定义文件回调存在 | 虚拟字体由适配器处理，其他请求串联原回调 |
-| TTC/OTC | 虚拟名称保存目标 face 索引 |
-| 映射关闭 | 恢复进入适配器前的回调与映射状态 |
+| Complete framework inventory + available Python APIs | Installs the mapping and file callback on the interpreter thread |
+| Framework confirmed, but Python not yet initialized | The worker thread waits and retries without executing scripts |
+| Custom file callback present | The adapter handles virtual fonts; other requests chain to the original callback |
+| TTC/OTC | The virtual name preserves the target face index |
+| Mapping disabled | Restores callback and mapping state from before the adapter was entered |
 
-证据目录包含框架清单、字体哈希、Python API 绑定、`[RenPy]` 日志和正负样本。
-字段规范见 [功能证据与复刻流程](../../../../../docs/reproduction.md)。
+The evidence directory contains the framework inventory, font hashes, Python API bindings,
+`[RenPy]` logs, and positive and negative samples. For field conventions, see
+[Feature Evidence and Reproduction Workflow](../../../../../docs/reproduction.md).
 
-## 验证
+## Verification
 
-覆盖 Ren'Py 正向与负向检测、Python 初始化时序、普通 TTF/OTF、TTC 不同字体面、
-非 ASCII 源路径、游戏自定义 `file_open_callback`、字体映射启用/关闭、热切换和退出。
+Cover positive and negative Ren'Py detection, Python initialization timing, ordinary TTF/OTF
+files, different TTC faces, non-ASCII source paths, game-customized `file_open_callback`,
+font-mapping enable/disable, font switching, and shutdown.

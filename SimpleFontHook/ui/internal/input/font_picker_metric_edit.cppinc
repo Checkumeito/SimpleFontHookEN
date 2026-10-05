@@ -141,6 +141,10 @@ static void FinishMetricEdit(bool apply) {
     g_hMetricEdit = NULL;
     g_metricEditKind = METRIC_VALUE_NONE;
     DestroyWindow(edit);
+    if (g_metricEditFont) {
+        DeleteObject(g_metricEditFont);
+        g_metricEditFont = NULL;
+    }
     g_OldMetricEditProc = NULL;
     g_metricEditClosing = false;
 
@@ -194,7 +198,16 @@ static void StartMetricEdit(MetricValueKind kind) {
         return;
     }
 
-    SendMessage(g_hMetricEdit, WM_SETFONT, (WPARAM)g_editFont, TRUE);
+    HDC editDc = GetDC(g_hMetricEdit);
+    HFONT valueFont = GetFittedPickerFont(editDc, value.c_str(),
+        MakeUiRect(0, 0, rc.right - rc.left - 2, rc.bottom - rc.top - 2), SF(11), FW_NORMAL, 2);
+    ReleaseDC(g_hMetricEdit, editDc);
+    LOGFONTW editFace = {};
+    GetObjectW(valueFont, sizeof(editFace), &editFace);
+    // EDIT retains WM_SETFONT across paints; its font must outlive cache eviction.
+    g_metricEditFont = CreateFontIndirectW(&editFace);
+    SendMessage(g_hMetricEdit, WM_SETFONT,
+        (WPARAM)(g_metricEditFont ? g_metricEditFont : GetStockObject(DEFAULT_GUI_FONT)), TRUE);
     g_OldMetricEditProc = (WNDPROC)SetWindowLongPtrW(g_hMetricEdit, GWLP_WNDPROC, (LONG_PTR)MetricEditSubclassProc);
     SendMessage(g_hMetricEdit, EM_SETSEL, 0, -1);
     SetFocus(g_hMetricEdit);
